@@ -1,2 +1,4 @@
 .env
-/node_modules
+/node_modules/
+/dist/
+AI-Agents-in-Depth-Bojie-Li-v1.2.pdf

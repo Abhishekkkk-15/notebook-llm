@@ -23,6 +23,6 @@ export interface IParentChunk {
 
 export interface ChunkingConfig {
   bookTitle: string;
-  childChunktokenSize?: number;
+  childChunkTokenSize?: number;
   childTokenOverlap?: number;
 }
