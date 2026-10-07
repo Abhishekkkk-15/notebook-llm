@@ -1,6 +1,7 @@
 import { config } from "dotenv";
 import { chunkBookHierarchy } from "./lib/tokenizer.js";
 import { readAndFormatPdf } from "./lib/pdfFormatter.js";
+import { chunkFormattedBook } from "./lib/chunker.js";
 config();
 // const bookSample = `
 // # Thermodynamics and Heat Flow
@@ -28,27 +29,55 @@ config();
 // console.log("\n=== CHILD CHUNK (For Vector Search) ===");
 // console.log(result.children[0]);
 
-async function main() {
-  const result = await readAndFormatPdf(
-    "./AI-Agents-in-Depth-Bojie-Li-v1.2.pdf",
-    {
-      bookTitle: "AI Agents in Depth",
-    },
-  );
+// async function main() {
+//   const result = await readAndFormatPdf(
+//     "./AI-Agents-in-Depth-Bojie-Li-v1.2.pdf",
+//     {
+//       bookTitle: "AI Agents in Depth",
+//     },
+//   );
 
-  console.log(`Title: ${result.bookTitle}`);
-  console.log(`Total Pages: ${result.totalPages}`);
-  console.log(`Extracted Sections: ${result.sections.length}\n`);
+//   console.log(`Title: ${result.bookTitle}`);
+//   console.log(`Total Pages: ${result.totalPages}`);
+//   console.log(`Extracted Sections: ${result.sections.length}\n`);
 
-  // Inspect the first section
-  const firstSection = result.sections[0];
-  if (!firstSection) return;
-  console.log("Breadcrumb:", firstSection.breadcrumb);
+//   // Inspect the first section
+//   const firstSection = result.sections[0];
+//   if (!firstSection) return;
+//   console.log("Breadcrumb:", firstSection.breadcrumb);
+//   console.log(
+//     "Page Range:",
+//     `${firstSection.pageStart} - ${firstSection.pageEnd}`,
+//   );
+//   console.log("ALL SECTINION", result.sections);
+// }
+
+// main();
+
+async function processPdf(pdfFilePath: string) {
+  // 1. Read & Format PDF directly into structured sections
+  const formattedBook = await readAndFormatPdf(pdfFilePath, {
+    bookTitle: "AI Agents in Depth",
+  });
+
   console.log(
-    "Page Range:",
-    `${firstSection.pageStart} - ${firstSection.pageEnd}`,
+    `Extracted ${formattedBook.sections.length} sections from ${formattedBook.totalPages} pages.`,
   );
-  console.log("Content Preview:\n", firstSection.content.slice(0, 300));
+
+  // 2. Feed structured sections into the chunking pipeline
+  const { parents, children } = chunkFormattedBook(formattedBook, {
+    childChunkTokenSize: 200,
+    childTokenOverlap: 40,
+  });
+
+  console.log(`Generated:`);
+  console.log(`- ${parents.length} Parent Chunks (for Document/KV Store)`);
+  console.log(`- ${children.length} Child Chunks (for Vector Database)`);
+
+  return { parents, children };
 }
 
-main();
+// Example execution
+processPdf("./AI-Agents-in-Depth-Bojie-Li-v1.2.pdf").then((p) => {
+  console.log(p.parents[p.parents.length]);
+});
