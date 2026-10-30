@@ -1,0 +1,59 @@
+import mongoose, { Schema, model, type Model, type Document } from "mongoose";
+import type { TMetadata } from "../../types/chunktypes.js";
+
+/**
+ * Interface representing a Parent Chunk document stored in MongoDB.
+ */
+export interface IParentChunkDoc extends Document {
+  chunkId: string;
+  text: string;
+  tokenCount: number;
+  metadata: TMetadata;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const MetadataSchema = new Schema<TMetadata>(
+  {
+    bookTitle: { type: String, required: true, index: true },
+    chapterNumber: { type: Number, required: true },
+    chapterTitle: { type: String, required: true },
+    subtopicTitle: { type: String, required: true },
+    breadcrumb: { type: String, required: true, index: true },
+  },
+  { _id: false },
+);
+
+const ParentChunkSchema = new Schema<IParentChunkDoc>(
+  {
+    chunkId: {
+      type: String,
+      required: true,
+      unique: true,
+      index: true,
+    },
+    text: {
+      type: String,
+      required: true,
+    },
+    tokenCount: {
+      type: Number,
+      required: true,
+    },
+    metadata: {
+      type: MetadataSchema,
+      required: true,
+    },
+  },
+  {
+    timestamps: true,
+    collection: "parent_chunks",
+  },
+);
+
+// Compound index for querying sections of a specific book efficiently
+ParentChunkSchema.index({ "metadata.bookTitle": 1, "metadata.chapterNumber": 1 });
+
+export const ParentChunkModel: Model<IParentChunkDoc> =
+  (mongoose.models["ParentChunk"] as Model<IParentChunkDoc>) ||
+  model<IParentChunkDoc>("ParentChunk", ParentChunkSchema);
