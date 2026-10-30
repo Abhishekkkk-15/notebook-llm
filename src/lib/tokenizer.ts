@@ -14,7 +14,10 @@ export function splitIntoIChildChunks(
   targetTokens = 200,
   overlapTokens = 40,
 ): string[] {
-  if (parentText.length <= targetTokens) {
+  const targetChars = targetTokens * 4;
+  const overlapChars = overlapTokens * 4;
+
+  if (parentText.length <= targetChars) {
     return [parentText.trim()];
   }
   const chunks: string[] = [];
@@ -22,29 +25,35 @@ export function splitIntoIChildChunks(
 
   let currentBuffer = "";
 
+  // Helper to carry forward trailing text as overlap without cutting words in half
+  const getCleanOverlap = (buffer: string): string => {
+    let sliceStart = Math.max(0, buffer.length - overlapChars);
+    const nextSpace = buffer.indexOf(" ", sliceStart);
+    if (nextSpace !== -1 && nextSpace < buffer.length) {
+      sliceStart = nextSpace + 1;
+    }
+    return buffer.slice(sliceStart).trim();
+  };
+
   for (const para of paragraphs) {
-    if ((currentBuffer + "\n\n" + para).length <= targetTokens) {
+    if ((currentBuffer + "\n\n" + para).length <= targetChars) {
       currentBuffer = currentBuffer ? `${currentBuffer}\n\n${para}` : para;
     } else {
       if (currentBuffer) {
         chunks.push(currentBuffer.trim());
-        // Carry forward trailing characters as overlap
-        const sliceStart = Math.max(0, currentBuffer.length - overlapTokens);
-        currentBuffer = currentBuffer.slice(sliceStart) + "\n\n" + para;
+        const overlap = getCleanOverlap(currentBuffer);
+        currentBuffer = overlap ? `${overlap}\n\n${para}` : para;
       } else {
         // Single Paragraph exceeds target size: split by sentences
         const sentences = para.split(/(?<=[.?!])\s+/);
         for (const sentence of sentences) {
-          if ((currentBuffer.length + " " + sentence).length <= targetTokens) {
+          if ((currentBuffer.length + " " + sentence).length <= targetChars) {
             currentBuffer =
               currentBuffer ? `${currentBuffer} ${sentence}` : sentence;
           } else {
             if (currentBuffer) chunks.push(currentBuffer.trim());
-            const sliceStart = Math.max(
-              0,
-              currentBuffer.length - overlapTokens,
-            );
-            currentBuffer = currentBuffer.slice(sliceStart) + " " + sentence;
+            const overlap = getCleanOverlap(currentBuffer);
+            currentBuffer = overlap ? `${overlap} ${sentence}` : sentence;
           }
         }
       }

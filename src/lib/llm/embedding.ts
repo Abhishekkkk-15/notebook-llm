@@ -6,8 +6,12 @@ import type {
   ChatCompletionUserMessageParam,
   Embedding,
 } from "openai/resources";
-import { RateLimitRetry } from "../retry.js";
+
 import { config } from "dotenv";
+
+import { RateLimitRetry } from "../retry.js";
+import type { IParentChunkDoc } from "../db/parent_chunk.model.js";
+import type { IParentChunk } from "../../types/chunktypes.js";
 
 type TProvider = "AZURE" | "NVIDIA";
 const MODELS = {
@@ -15,6 +19,21 @@ const MODELS = {
 } as const;
 
 config();
+
+export function build_system_prompt(content: IParentChunkDoc[]): string {
+  const sections = content.map((c) => {
+    return `### Source: ${c.metadata.breadcrumb}\n${c.text}`;
+  });
+
+  return `You are a helpful assistant for the learning platform Notebook-LLM.
+Your task is to answer the user's questions accurately and concisely using ONLY the provided content below. If the answer cannot be found in the content, state that you do not know based on the provided material.
+
+## Context Material:
+${sections.join("\n\n---\n\n")}
+`;
+}
+
+ 
 
 export class LLM {
   private az_client: AzureOpenAI;
@@ -77,7 +96,6 @@ export class LLM {
   @RateLimitRetry({ maxRetries: 3, initialDelayMs: 1000 })
   async generate_completion(
     messages: ChatCompletionMessageParam[],
-    user_msg: ChatCompletionUserMessageParam,
   ): Promise<ChatCompletionMessage | undefined> {
     try {
       let res = await this.az_client.chat.completions.create({
