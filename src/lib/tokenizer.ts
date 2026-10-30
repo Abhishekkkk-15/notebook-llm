@@ -1,3 +1,4 @@
+import { encode } from "gpt-tokenizer";
 import type {
   ChunkingConfig,
   IChildChunk,
@@ -5,7 +6,7 @@ import type {
 } from "../types/chunktypes.js";
 
 export function estimateTokens(text: string): number {
-  return Math.ceil(text.trim().length / 4);
+  return encode(text).length;
 }
 
 export function splitIntoIChildChunks(
@@ -13,9 +14,7 @@ export function splitIntoIChildChunks(
   targetTokens = 200,
   overlapTokens = 40,
 ): string[] {
-  const targetChars = targetTokens * 4;
-  const overlapChars = overlapTokens * 4;
-  if (parentText.length <= targetChars) {
+  if (parentText.length <= targetTokens) {
     return [parentText.trim()];
   }
   const chunks: string[] = [];
@@ -24,24 +23,27 @@ export function splitIntoIChildChunks(
   let currentBuffer = "";
 
   for (const para of paragraphs) {
-    if ((currentBuffer + "\n\n" + para).length <= targetChars) {
+    if ((currentBuffer + "\n\n" + para).length <= targetTokens) {
       currentBuffer = currentBuffer ? `${currentBuffer}\n\n${para}` : para;
     } else {
       if (currentBuffer) {
         chunks.push(currentBuffer.trim());
         // Carry forward trailing characters as overlap
-        const sliceStart = Math.max(0, currentBuffer.length - overlapChars);
+        const sliceStart = Math.max(0, currentBuffer.length - overlapTokens);
         currentBuffer = currentBuffer.slice(sliceStart) + "\n\n" + para;
       } else {
         // Single Paragraph exceeds target size: split by sentences
         const sentences = para.split(/(?<=[.?!])\s+/);
         for (const sentence of sentences) {
-          if ((currentBuffer.length + " " + sentence).length <= targetChars) {
+          if ((currentBuffer.length + " " + sentence).length <= targetTokens) {
             currentBuffer =
               currentBuffer ? `${currentBuffer} ${sentence}` : sentence;
           } else {
             if (currentBuffer) chunks.push(currentBuffer.trim());
-            const sliceStart = Math.max(0, currentBuffer.length - overlapChars);
+            const sliceStart = Math.max(
+              0,
+              currentBuffer.length - overlapTokens,
+            );
             currentBuffer = currentBuffer.slice(sliceStart) + " " + sentence;
           }
         }
