@@ -191,6 +191,9 @@ importers:
 
   .:
     dependencies:
+      '@pinecone-database/pinecone':
+        specifier: ^9.1.0
+        version: 9.1.0
       dotenv:
         specifier: ^18.0.5
         version: 18.0.5
@@ -446,6 +449,10 @@ packages:
   '@napi-rs/canvas@1.0.10':
     resolution: {integrity: sha512-V+qptzsGnPMFxEbhwc6eDNMe5eDrfiBIp8qGpuRjAVIX4Kn2zxvwQ1Xco6Fwe+3tYIe3iLW8LM9D+SvjyJhqbQ==}
     engines: {node: '>= 10'}
+
+  '@pinecone-database/pinecone@9.1.0':
+    resolution: {integrity: sha512-+lFTXKgvVc28w83WN7ipcxkxr+MxQaxLhN7ICr7/J+eZ/Uw3/lZ8wMpub3CgpC4gHCY+Gmli2n25JgGGDdnHoA==}
+    engines: {node: '>=22.0.0'}
 
   '@types/node@26.6.4':
     resolution: {integrity: sha512-ldVPDCzj7fsaGZrLB0NuHuTvJcsNasysBAqMolr/cgxrLd1xbqxIr3XJiPnHHJUCxj5sNF1vnRj9aWnrVh5Jcg==}
@@ -784,6 +791,8 @@ snapshots:
       '@napi-rs/canvas-win32-arm64-msvc': 1.0.10
       '@napi-rs/canvas-win32-x64-msvc': 1.0.10
     optional: true
+
+  '@pinecone-database/pinecone@9.1.0': {}
 
   '@types/node@26.6.4':
     dependencies:
