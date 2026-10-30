@@ -1,116 +1,89 @@
+import path from "node:path";
 import { config } from "dotenv";
-import { chunkBookHierarchy } from "./lib/tokenizer.js";
-import { readAndFormatPdf } from "./lib/pdfFormatter.js";
-import { chunkFormattedBook } from "./lib/chunker.js";
+import { InteractiveCLI } from "./transport/cli.js";
+import { RAGPipeline } from "./service/rag_pipeline.js";
 import { PinconeStore } from "./lib/db/pc_store.js";
+import { mongoParentStore } from "./lib/db/mongo_store.js";
 import { llm } from "./lib/llm/embedding.js";
+
 config();
 
-let pc = new PinconeStore();
+const pcStore = new PinconeStore();
+const ragPipeline = new RAGPipeline(pcStore, mongoParentStore, llm);
 
-// const bookSample = `
-// # Thermodynamics and Heat Flow
+const cli = new InteractiveCLI({
+  appName: "Notebook-LLM",
+  version: "1.0.0",
+  defaultNamespace: "child_chunks",
+  defaultTopK: 5,
+  bannerSubtitle: "Hierarchical Parent-Child RAG with Pinecone & MongoDB",
+});
 
-// ## The Carnot Cycle
-// A Carnot cycle consists of four successive steps: two isothermal processes and two adiabatic processes.
-// During the first step, gas absorbs heat at constant temperature T_h. The system expands reversibly against the piston.
+cli.setHandlers({
+  // Natural language query / LLM Q&A
+  onQuery: async (prompt, { topK, namespace }) => {
+    const res = await ragPipeline.query({
+      query: prompt,
+      topK,
+      namespace,
+    });
+    return {
+      answer: res.answer ?? undefined,
+      sources: res.sources,
+    };
+  },
 
-// In the second step, the gas expands adiabatically without heat exchange. The working substance cools from T_h to T_c. This process produces mechanical work by expending internal energy.
+  // Raw semantic vector search
+  onSearch: async (query, { topK, namespace }) => {
+    const vec = await llm.generate_embedding(query, "NVIDIA", "query");
+    if (!vec) throw new Error("Failed to generate embedding for query");
+    const matches = await pcStore.search(vec, { topK, namespace });
+    return matches.map((m) => ({
+      id: m.id,
+      score: m.score,
+      breadcrumb: m.metadata?.breadcrumb,
+      text: m.metadata?.text,
+      metadata: m.metadata,
+    }));
+  },
 
-// ## Thermal Efficiency Limitations
-// Real heat engines cannot achieve 100% thermal efficiency due to irreversible friction and heat leakage.
-// Second law of thermodynamics establishes that entropy generation must always be non-negative in closed thermodynamic cycles.
-// `;
+  // Document ingestion from PDF
+  onIngest: async (filePath, options) => {
+    const title =
+      options.title || path.basename(filePath, path.extname(filePath));
+    return await ragPipeline.ingestDocument({
+      filePath,
+      bookTitle: title,
+      childTokenSize: options.childChunkTokenSize,
+      childOverlap: options.childTokenOverlap,
+    });
+  },
 
-// const result = chunkBookHierarchy(bookSample, {
-//   bookTitle: "Engineering Thermodynamics",
-//   childChunkTokenSize: 50,
-//   childTokenOverlap: 10,
-// });
+  // System and database status
+  onStatus: async () => {
+    const parentCount = await mongoParentStore.countParents();
+    return {
+      "MongoDB Parent Documents": parentCount,
+      "Vector Database": "Pinecone",
+      "Vector Namespace": "child_chunks",
+      "Embedding Model": "nvidia/nemotron-3.5-embed-1b",
+      "LLM Model": "Azure OpenAI (gpt-5.6-luna)",
+    };
+  },
 
-// console.log("=== PARENT CHUNK (For Generation) ===");
-// console.log(result.parents[0]);
+  // Clear namespace
+  onClear: async (namespace) => {
+    const ns = namespace || "child_chunks";
+    await pcStore.clearNamespace(ns);
+    return `Namespace '${ns}' successfully cleared from Pinecone.`;
+  },
+});
 
-// console.log("\n=== CHILD CHUNK (For Vector Search) ===");
-// console.log(result.children[0]);
-
-// async function main() {
-//   const result = await readAndFormatPdf(
-//     "./AI-Agents-in-Depth-Bojie-Li-v1.2.pdf",
-//     {
-//       bookTitle: "AI Agents in Depth",
-//     },
-//   );
-
-//   console.log(`Title: ${result.bookTitle}`);
-//   console.log(`Total Pages: ${result.totalPages}`);
-//   console.log(`Extracted Sections: ${result.sections.length}\n`);
-
-//   // Inspect the first section
-//   const firstSection = result.sections[0];
-//   if (!firstSection) return;
-//   console.log("Breadcrumb:", firstSection.breadcrumb);
-//   console.log(
-//     "Page Range:",
-//     `${firstSection.pageStart} - ${firstSection.pageEnd}`,
-//   );
-//   console.log("ALL SECTINION", result.sections);
-// }
-
-// main();
-
-async function processPdf(pdfFilePath: string) {
-  // 1. Read & Format PDF directly into structured sections
-  const formattedBook = await readAndFormatPdf(pdfFilePath, {
-    bookTitle: "AI Agents in Depth",
-  });
-
-  console.log(
-    `Extracted ${formattedBook.sections.length} sections from ${formattedBook.totalPages} pages.`,
-  );
-
-  // 2. Feed structured sections into the chunking pipeline
-  const { parents, children } = chunkFormattedBook(formattedBook, {
-    childChunkTokenSize: 200,
-    childTokenOverlap: 40,
-  });
-
-  console.log(`Generated:`);
-  console.log(`- ${parents.length} Parent Chunks (for Document/KV Store)`);
-  console.log(`- ${children.length} Child Chunks (for Vector Database)`);
-
-  return { parents, children };
+async function main() {
+  await cli.start();
 }
 
-// Example execution
-processPdf("./AI-Agents-in-Depth-Bojie-Li-v1.2.pdf").then(async (p) => {
-  let child_with_vec = [];
-
-  // for (let c of p.children) {
-  //   let vector = await llm.generate_embedding(c.text);
-
-  //   child_with_vec.push({
-  //     chunk: c,
-  //     vector: vector ? vector : [1, 1, 2, 3, 4],
-  //   });
-  // }
-
-  // console.log(
-  //   "embedding generation completed",
-  //   child_with_vec[child_with_vec.length - 1],
-  // );
-
-  // const count = await pc.upsertChunks(child_with_vec, {
-  //   namespace: "child_chunks",
-  // });
-
-  let query = "the Co-Evolution of Models and Agents";
-
-  let query_embed = await llm.generate_embedding(query, "NVIDIA", "query");
-
-  let res = await pc.search(query_embed!, { namespace: "child_chunks" });
-
-  console.log(res);
-
-  console.log(p.parents[p.parents.length]);
+main().catch((err) => {
+  console.error("Fatal CLI error:", err);
+  process.exit(1);
 });

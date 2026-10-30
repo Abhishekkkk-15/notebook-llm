@@ -36,21 +36,20 @@ ${sections.join("\n\n---\n\n")}
  
 
 export class LLM {
-  private az_client: AzureOpenAI;
+  private az_client: OpenAI;
   private inv_client: OpenAI;
 
   //   private embedding_client :
   constructor() {
     let nvidia_api_key = process.env.NVIDIA_KEY;
-    let openai_key = process.env.OPENAI_KEY || "sdfsdfs";
+    let openai_key = process.env.AZURE_API_KEY || "sdfsdfs";
     let azure_base_url = process.env.AZURE_BASE_URL || "";
     let nvidia_base_url =
       process.env.INVIDIA_BASE_URL || "https://integrate.api.nvidia.com/v1";
 
-    this.az_client = new AzureOpenAI({
+    this.az_client = new OpenAI({
       apiKey: openai_key,
       baseURL: azure_base_url,
-      apiVersion: "v1",
     });
     this.inv_client = new OpenAI({
       apiKey: nvidia_api_key,

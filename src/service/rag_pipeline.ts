@@ -22,6 +22,16 @@ interface IQueryOption {
   topK?: number;
 }
 
+export interface IQueryResponse {
+  answer?: string;
+  sources: Array<{
+    id: string;
+    score: number;
+    breadcrumb?: string;
+    text?: string;
+  }>;
+}
+
 export class RAGPipeline {
   constructor(
     private pcStore = new PinconeStore(),
@@ -121,6 +131,14 @@ export class RAGPipeline {
 
     const res = await this.llmClient.generate_completion(messages);
 
-    return res?.content;
+    return {
+      answer: res?.content ?? undefined,
+      sources: child_chunks.map((c) => ({
+        id: c.id,
+        score: c.score,
+        breadcrumb: c.metadata.breadcrumb,
+        text: c.metadata.text,
+      })),
+    };
   }
 }
