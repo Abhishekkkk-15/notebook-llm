@@ -1,4 +1,4 @@
-import { encode } from "gpt-tokenizer";
+import { countTokens } from "gpt-tokenizer";
 import type {
   ChunkingConfig,
   IChildChunk,
@@ -6,7 +6,11 @@ import type {
 } from "../types/chunktypes.js";
 
 export function estimateTokens(text: string): number {
-  return encode(text).length;
+  try {
+    return countTokens(text, { disallowedSpecial: new Set() });
+  } catch {
+    return Math.ceil(text.length / 4);
+  }
 }
 
 export function splitIntoIChildChunks(
