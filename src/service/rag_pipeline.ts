@@ -4,7 +4,8 @@ import { chunkFormattedBook } from "../lib/chunker.js";
 import { readAndFormatPdf } from "../lib/pdfFormatter.js";
 import { mongoParentStore } from "../lib/db/mongo_store.js";
 import { PinconeStore } from "../lib/db/pc_store.js";
-import { build_system_prompt, llm } from "../lib/llm/embedding.js";
+import { build_system_prompt, flat_chunks, llm } from "../lib/llm/embedding.js";
+import { MemoryRegistory } from "../lib/llm/memory_registory.js";
 
 interface IIngestOption {
   filePath: string;
@@ -63,9 +64,7 @@ export class RAGPipeline {
       );
 
       if (!vector) {
-        throw new Error(
-          `Failed to generate embedding for child chunk ${c.id}`,
-        );
+        throw new Error(`Failed to generate embedding for child chunk ${c.id}`);
       }
 
       child_with_vec.push({
@@ -112,24 +111,22 @@ export class RAGPipeline {
       topK: option.topK ?? 5,
     });
 
+    const higheScoredChunks = child_chunks.filter((c) => c.score >= 0.5);
+
+    console.log(higheScoredChunks);
+
     let parent_ids: string[] = child_chunks.map((c) => c.metadata.parentId);
 
     let full_content = await this.parentStore.getParentsByIds(parent_ids);
 
-    let sys_prompt = build_system_prompt(full_content);
+    const user_message =
+      "User Query : " +
+      option.query +
+      "\n" +
+      "## Sources : \n " +
+      flat_chunks(full_content);
 
-    let messages: ChatCompletionMessageParam[] = [
-      {
-        role: "system",
-        content: sys_prompt,
-      },
-      {
-        role: "user",
-        content: option.query,
-      },
-    ];
-
-    const res = await this.llmClient.generate_completion(messages);
+    const res = await this.llmClient.generate_completion(user_message);
 
     return {
       answer: res?.content ?? undefined,

@@ -12,6 +12,7 @@ import { config } from "dotenv";
 import { RateLimitRetry } from "../retry.js";
 import type { IParentChunkDoc } from "../db/parent_chunk.model.js";
 import type { IParentChunk } from "../../types/chunktypes.js";
+import { MemoryRegistory } from "./memory_registory.js";
 
 type TProvider = "AZURE" | "NVIDIA";
 const MODELS = {
@@ -20,24 +21,27 @@ const MODELS = {
 
 config();
 
-export function build_system_prompt(content: IParentChunkDoc[]): string {
-  const sections = content.map((c) => {
+export function flat_chunks(chunks: IParentChunkDoc[]) {
+  const sections = chunks?.map((c) => {
+    return `### Source: ${c.metadata.breadcrumb}\n${c.text}`;
+  });
+  return sections;
+}
+
+export function build_system_prompt(content?: IParentChunkDoc[]): string {
+  const sections = content?.map((c) => {
     return `### Source: ${c.metadata.breadcrumb}\n${c.text}`;
   });
 
   return `You are a helpful assistant for the learning platform Notebook-LLM.
 Your task is to answer the user's questions accurately and concisely using ONLY the provided content below. If the answer cannot be found in the content, state that you do not know based on the provided material.
-
-## Context Material:
-${sections.join("\n\n---\n\n")}
 `;
 }
-
- 
 
 export class LLM {
   private az_client: OpenAI;
   private inv_client: OpenAI;
+  private memory_store: MemoryRegistory;
 
   //   private embedding_client :
   constructor() {
@@ -55,6 +59,7 @@ export class LLM {
       apiKey: nvidia_api_key,
       baseURL: nvidia_base_url,
     });
+    this.memory_store = new MemoryRegistory();
   }
 
   //   get_client(provider:TProvider = "NVIDIA"):OpenAI{
@@ -94,13 +99,20 @@ export class LLM {
 
   @RateLimitRetry({ maxRetries: 3, initialDelayMs: 1000 })
   async generate_completion(
-    messages: ChatCompletionMessageParam[],
+    user_message: string,
   ): Promise<ChatCompletionMessage | undefined> {
     try {
+      await this.memory_store.user(user_message);
+      const messages = await this.memory_store.get_message();
       let res = await this.az_client.chat.completions.create({
         messages,
         model: "gpt-5.6-luna",
       });
+
+      this.memory_store.assistent(
+        res.choices[0]?.message.content as string,
+        res.choices[0]?.message.tool_calls,
+      );
 
       return res.choices[0]?.message;
     } catch (error) {

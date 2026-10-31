@@ -5,9 +5,9 @@ import { RAGPipeline } from "./service/rag_pipeline.js";
 import { PinconeStore } from "./lib/db/pc_store.js";
 import { mongoParentStore } from "./lib/db/mongo_store.js";
 import { llm } from "./lib/llm/embedding.js";
-
+import dns from "node:dns";
 config();
-
+dns.setServers(["8.8.8.8", "8.8.4.4"]);
 const pcStore = new PinconeStore();
 const ragPipeline = new RAGPipeline(pcStore, mongoParentStore, llm);
 
