@@ -6,82 +6,32 @@ import { stdin as input, stdout as output } from "node:process";
  * INTERACTIVE CLI / TUI FOR NOTEBOOK-LLM / GRAPH-RAG
  * ============================================================================
  *
- * This class provides a standalone, fully featured terminal user interface (CLI/TUI)
- * for interacting with the Notebook-LLM application.
- *
- * It is completely decoupled from your core business logic. You can connect it
- * by passing action handlers (query, search, ingest, status, clear) via its
- * constructor or `setHandlers()` method.
- *
- * ─── USAGE EXAMPLE ──────────────────────────────────────────────────────────
- * ```typescript
- * import { InteractiveCLI } from "./transport/cli.js";
- * import { PinconeStore } from "./lib/db/pc_store.js";
- * import { llm } from "./lib/llm/embedding.js";
- * import { readAndFormatPdf } from "./lib/pdfFormatter.js";
- * import { chunkFormattedBook } from "./lib/chunker.js";
- *
- * const pc = new PinconeStore();
- * const cli = new InteractiveCLI({
- *   appName: "Notebook-LLM Terminal",
- *   defaultNamespace: "child_chunks",
- *   defaultTopK: 5,
- * });
- *
- * // Hook up your application logic:
- * cli.setHandlers({
- *   onSearch: async (query, { topK, namespace }) => {
- *     const vec = await llm.generate_embedding(query, "NVIDIA", "query");
- *     return await pc.search(vec!, { topK, namespace });
- *   },
- *   onQuery: async (prompt, { topK, namespace }) => {
- *     const vec = await llm.generate_embedding(prompt, "NVIDIA", "query");
- *     const matches = await pc.search(vec!, { topK, namespace });
- *     // (Optional) Synthesize answer with LLM
- *     return {
- *       answer: "Synthesized answer...",
- *       sources: matches.map(m => ({
- *         id: m.id,
- *         score: m.score,
- *         breadcrumb: m.metadata?.breadcrumb,
- *         text: m.metadata?.text,
- *       })),
- *     };
- *   },
- * });
- *
- * await cli.start();
- * ```
+ * Clean, minimal, modern terminal interface.
+ * Decoupled from core logic via ICLIHandlers.
  */
 
-// ─── ANSI COLORS & FORMATTING UTILITIES ─────────────────────────────────────
+// ─── MINIMAL ANSI PALETTE (Subtle & Modern) ─────────────────────────────────
 const c = {
   reset: "\x1b[0m",
   bold: "\x1b[1m",
   dim: "\x1b[2m",
   italic: "\x1b[3m",
   underline: "\x1b[4m",
-  // Foreground Colors
-  black: "\x1b[30m",
-  red: "\x1b[31m",
-  green: "\x1b[32m",
-  yellow: "\x1b[33m",
-  blue: "\x1b[34m",
-  magenta: "\x1b[35m",
+
+  // Modern soft palette
+  text: "\x1b[37m",
+  muted: "\x1b[90m",
   cyan: "\x1b[36m",
-  white: "\x1b[37m",
-  gray: "\x1b[90m",
-  // Bright Foreground
-  brightRed: "\x1b[91m",
-  brightGreen: "\x1b[92m",
-  brightYellow: "\x1b[93m",
-  brightBlue: "\x1b[94m",
-  brightMagenta: "\x1b[95m",
-  brightCyan: "\x1b[96m",
-  // Background Colors
-  bgBlue: "\x1b[44m",
-  bgCyan: "\x1b[46m",
-  bgMagenta: "\x1b[45m",
+  cyanBright: "\x1b[96m",
+  emerald: "\x1b[32m",
+  emeraldBright: "\x1b[92m",
+  amber: "\x1b[33m",
+  amberBright: "\x1b[93m",
+  rose: "\x1b[31m",
+  roseBright: "\x1b[91m",
+  violet: "\x1b[35m",
+  violetBright: "\x1b[95m",
+  blue: "\x1b[34m",
 };
 
 // ─── TYPE DEFINITIONS ───────────────────────────────────────────────────────
@@ -114,48 +64,29 @@ export interface ICLIIngestResult {
 
 /** Configurable hooks for linking the CLI to the underlying application */
 export interface ICLIHandlers {
-  /**
-   * Handles natural language Q&A queries.
-   * If user types plain text or `/ask <question>`, this is invoked.
-   */
   onQuery?: (
     query: string,
     options: { topK: number; namespace: string },
   ) => Promise<ICLIQueryResponse | string | void>;
 
-  /**
-   * Handles raw semantic vector searches (`/search <query>`).
-   */
   onSearch?: (
     query: string,
     options: { topK: number; namespace: string },
   ) => Promise<ICLISourceMatch[]>;
 
-  /**
-   * Handles document ingestion (`/ingest <filePath> [optionalTitle]`).
-   */
   onIngest?: (
     filePath: string,
     options: { title?: string; childChunkTokenSize?: number; childTokenOverlap?: number },
   ) => Promise<ICLIIngestResult | void>;
 
-  /**
-   * Handles `/status` command to display current index/database status.
-   */
   onStatus?: () => Promise<Record<string, any> | void>;
 
-  /**
-   * Handles `/clear [namespace]` to wipe records.
-   */
   onClear?: (namespace?: string) => Promise<string | void>;
 
-  /**
-   * Extension point for custom slash commands.
-   */
   onCustomCommand?: (command: string, args: string[]) => Promise<string | void>;
 }
 
-/** Configuration options for the InteractiveCLI */
+/** Configuration options for InteractiveCLI */
 export interface ICLIConfig {
   appName?: string;
   version?: string;
@@ -166,7 +97,7 @@ export interface ICLIConfig {
 }
 
 /**
- * Interactive CLI / Terminal User Interface Controller
+ * Modern Minimal Interactive CLI / TUI Controller
  */
 export class InteractiveCLI {
   private config: Required<ICLIConfig>;
@@ -175,7 +106,6 @@ export class InteractiveCLI {
   private isRunning = false;
   private abortController: AbortController | null = null;
 
-  // Runtime state adjustable via commands like `/set topK 10`
   private state: {
     namespace: string;
     topK: number;
@@ -188,12 +118,12 @@ export class InteractiveCLI {
 
   constructor(config?: ICLIConfig, handlers?: ICLIHandlers) {
     this.config = {
-      appName: config?.appName ?? "Notebook-LLM RAG CLI",
+      appName: config?.appName ?? "notebook-llm",
       version: config?.version ?? "1.0.0",
       defaultNamespace: config?.defaultNamespace ?? "child_chunks",
       defaultTopK: config?.defaultTopK ?? 5,
-      promptSymbol: config?.promptSymbol ?? "❯",
-      bannerSubtitle: config?.bannerSubtitle ?? "Hierarchical Parent-Document & Graph-RAG Terminal",
+      promptSymbol: config?.promptSymbol ?? "›",
+      bannerSubtitle: config?.bannerSubtitle ?? "Hierarchical Parent-Document RAG",
     };
 
     this.state = {
@@ -206,17 +136,11 @@ export class InteractiveCLI {
     }
   }
 
-  /**
-   * Register or update operational handlers.
-   */
   public setHandlers(handlers: Partial<ICLIHandlers>): this {
     this.handlers = { ...this.handlers, ...handlers };
     return this;
   }
 
-  /**
-   * Start the interactive terminal loop.
-   */
   public async start(): Promise<void> {
     if (this.isRunning) {
       console.warn("CLI is already running.");
@@ -233,13 +157,11 @@ export class InteractiveCLI {
       terminal: input.isTTY ?? false,
     });
 
-    // Handle Ctrl+C gracefully
     this.rl.on("SIGINT", () => {
-      this.printInfo("\nCaught interrupt signal (Ctrl+C). Type /exit to quit.");
+      this.printInfo("Interrupt signal caught (Ctrl+C). Type /exit to quit.");
       this.prompt();
     });
 
-    // Handle stream closure / EOF gracefully
     this.rl.on("close", () => {
       if (this.isRunning) {
         this.stop();
@@ -249,9 +171,6 @@ export class InteractiveCLI {
     await this.replLoop();
   }
 
-  /**
-   * Stop the CLI and close the terminal interface.
-   */
   public stop(): void {
     if (!this.isRunning) return;
     this.isRunning = false;
@@ -264,7 +183,7 @@ export class InteractiveCLI {
       this.rl.close();
       this.rl = null;
     }
-    console.log(`\n${c.dim}Session ended. Goodbye!${c.reset}\n`);
+    console.log(`\n${c.muted}Session ended. Bye!${c.reset}\n`);
   }
 
   // ─── REPL LOOP ────────────────────────────────────────────────────────────
@@ -272,7 +191,8 @@ export class InteractiveCLI {
   private async replLoop(): Promise<void> {
     while (this.isRunning && this.rl) {
       try {
-        const promptLabel = `${c.dim}[${c.cyan}${this.state.namespace}${c.dim}|k=${c.yellow}${this.state.topK}${c.dim}]${c.reset} ${c.brightCyan}${this.config.promptSymbol}${c.reset} `;
+        // Minimal prompt: [namespace] ›
+        const promptLabel = `${c.muted}[${c.cyan}${this.state.namespace}${c.muted}]${c.reset} ${c.cyanBright}${this.config.promptSymbol}${c.reset} `;
         const rawInput = await this.rl.question(promptLabel, {
           signal: this.abortController?.signal,
         });
@@ -284,18 +204,13 @@ export class InteractiveCLI {
 
         await this.handleInput(line);
       } catch (err: any) {
-        // If aborted or readline was closed
         if (!this.isRunning || err?.name === "AbortError") break;
         this.printError("Unexpected terminal loop error", err);
       }
     }
   }
 
-  /**
-   * Dispatches input to corresponding slash command or default query handler.
-   */
   private async handleInput(inputStr: string): Promise<void> {
-    // Check if input is a slash command
     if (inputStr.startsWith("/")) {
       const parts = inputStr.slice(1).trim().split(/\s+/);
       const command = parts[0]?.toLowerCase() ?? "";
@@ -324,11 +239,10 @@ export class InteractiveCLI {
           break;
 
         case "ask":
-        case "q":
         case "query": {
           const queryText = args.join(" ").trim();
           if (!queryText) {
-            this.printWarn("Usage: /ask <your question or query>");
+            this.printWarn("Usage: /ask <question>");
             return;
           }
           await this.executeQuery(queryText);
@@ -338,7 +252,7 @@ export class InteractiveCLI {
         case "search": {
           const searchText = args.join(" ").trim();
           if (!searchText) {
-            this.printWarn("Usage: /search <semantic search terms>");
+            this.printWarn("Usage: /search <terms>");
             return;
           }
           await this.executeSearch(searchText);
@@ -348,7 +262,7 @@ export class InteractiveCLI {
         case "ingest": {
           const filePath = args[0];
           if (!filePath) {
-            this.printWarn("Usage: /ingest <path-to-pdf> [optional-book-title]");
+            this.printWarn("Usage: /ingest <path-to-pdf> [title]");
             return;
           }
           const title = args.slice(1).join(" ") || undefined;
@@ -365,9 +279,8 @@ export class InteractiveCLI {
           break;
 
         default:
-          // Try delegate custom command handler
           if (this.handlers.onCustomCommand) {
-            this.startSpinner(`Executing custom command /${command}...`);
+            this.startSpinner(`Executing /${command}...`);
             try {
               const res = await this.handlers.onCustomCommand(command, args);
               this.stopSpinner(true);
@@ -377,25 +290,24 @@ export class InteractiveCLI {
               this.printError(`Command /${command} failed`, err);
             }
           } else {
-            this.printWarn(`Unknown command: /${command}. Type ${c.bold}/help${c.reset} for available commands.`);
+            this.printWarn(`Unknown command /${command}. Type ${c.bold}/help${c.reset} for list.`);
           }
           break;
       }
     } else {
-      // Default: Bare text is treated as a natural language query / ask
       await this.executeQuery(inputStr);
     }
   }
 
-  // ─── COMMAND ACTIONS ──────────────────────────────────────────────────────
+  // ─── ACTIONS ──────────────────────────────────────────────────────────────
 
   private async executeQuery(query: string): Promise<void> {
     if (!this.handlers.onQuery) {
-      this.printWarn("No 'onQuery' handler registered. Connect your LLM/RAG pipeline using cli.setHandlers({ onQuery: ... }).");
+      this.printWarn("No 'onQuery' handler registered. Connect via cli.setHandlers({ onQuery: ... })");
       return;
     }
 
-    this.startSpinner(`Retrieving context and generating response for: "${query}"...`);
+    this.startSpinner("Thinking & retrieving context...");
     const startTime = Date.now();
 
     try {
@@ -405,10 +317,10 @@ export class InteractiveCLI {
       });
 
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
-      this.stopSpinner(true, `Answer completed in ${elapsed}s`);
+      this.stopSpinner(true, `Done in ${elapsed}s`);
 
       if (!response) {
-        this.printInfo("Query completed with no text returned.");
+        this.printInfo("No response returned.");
         return;
       }
 
@@ -430,11 +342,11 @@ export class InteractiveCLI {
 
   private async executeSearch(query: string): Promise<void> {
     if (!this.handlers.onSearch) {
-      this.printWarn("No 'onSearch' handler registered. Connect your vector search using cli.setHandlers({ onSearch: ... }).");
+      this.printWarn("No 'onSearch' handler registered. Connect via cli.setHandlers({ onSearch: ... })");
       return;
     }
 
-    this.startSpinner(`Searching vector index [${this.state.namespace}] (topK=${this.state.topK})...`);
+    this.startSpinner(`Searching vector index...`);
     const startTime = Date.now();
 
     try {
@@ -455,27 +367,30 @@ export class InteractiveCLI {
 
   private async executeIngest(filePath: string, title?: string): Promise<void> {
     if (!this.handlers.onIngest) {
-      this.printWarn("No 'onIngest' handler registered. Connect your PDF pipeline using cli.setHandlers({ onIngest: ... }).");
+      this.printWarn("No 'onIngest' handler registered. Connect via cli.setHandlers({ onIngest: ... })");
       return;
     }
 
-    this.startSpinner(`Ingesting document: ${filePath}...`);
+    this.startSpinner(`Ingesting ${filePath}...`);
     const startTime = Date.now();
 
     try {
       const res = await this.handlers.onIngest(filePath, { title });
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
-      this.stopSpinner(true, `Ingestion complete in ${elapsed}s`);
+      this.stopSpinner(true, `Ingestion finished in ${elapsed}s`);
 
       if (res) {
-        this.printBox("Ingestion Summary", [
-          `Title:         ${c.cyan}${res.bookTitle ?? title ?? "N/A"}${c.reset}`,
-          `Total Pages:   ${c.yellow}${res.totalPages ?? "N/A"}${c.reset}`,
-          `Sections:      ${c.magenta}${res.sectionsCount ?? "N/A"}${c.reset}`,
-          `Parent Chunks: ${c.green}${res.parentCount}${c.reset}`,
-          `Child Chunks:  ${c.brightCyan}${res.childCount}${c.reset}`,
-          res.message ? `Note:          ${c.dim}${res.message}${c.reset}` : "",
-        ].filter(Boolean));
+        const entries: Array<[string, string]> = [
+          ["Title", res.bookTitle ?? title ?? "N/A"],
+          ["Total Pages", String(res.totalPages ?? "N/A")],
+          ["Sections", String(res.sectionsCount ?? "N/A")],
+          ["Parent Chunks", `${c.emerald}${res.parentCount}${c.reset}`],
+          ["Child Chunks", `${c.cyan}${res.childCount}${c.reset}`],
+        ];
+        if (res.message) {
+          entries.push(["Note", `${c.muted}${res.message}${c.reset}`]);
+        }
+        this.printCard("Ingestion Summary", entries);
       }
     } catch (err) {
       this.stopSpinner(false, "Ingestion failed");
@@ -484,21 +399,25 @@ export class InteractiveCLI {
   }
 
   private async executeStatus(): Promise<void> {
-    console.log(`\n${c.bold}${c.brightBlue}─── APPLICATION & RUNTIME STATUS ───${c.reset}`);
-    console.log(`  ${c.dim}Active Namespace:${c.reset} ${c.cyan}${this.state.namespace}${c.reset}`);
-    console.log(`  ${c.dim}Default Top-K:${c.reset}    ${c.yellow}${this.state.topK}${c.reset}`);
-    console.log(`  ${c.dim}App Name:${c.reset}         ${this.config.appName} v${this.config.version}`);
+    console.log(`\n${c.bold}System Status${c.reset}`);
+    this.printKeyValueList([
+      ["Namespace", `${c.cyan}${this.state.namespace}${c.reset}`],
+      ["Top-K", `${c.amber}${this.state.topK}${c.reset}`],
+      ["App Version", `${this.config.appName} v${this.config.version}`],
+    ]);
 
     if (this.handlers.onStatus) {
-      this.startSpinner("Fetching database & backend status...");
+      this.startSpinner("Querying database stats...");
       try {
         const stats = await this.handlers.onStatus();
         this.stopSpinner(true);
         if (stats && typeof stats === "object") {
-          console.log(`\n${c.bold}Remote Index Stats:${c.reset}`);
-          for (const [key, val] of Object.entries(stats)) {
-            console.log(`  ${c.dim}${key}:${c.reset} ${typeof val === "object" ? JSON.stringify(val) : val}`);
-          }
+          console.log(`\n${c.muted}Remote Backend:${c.reset}`);
+          const entries: Array<[string, string]> = Object.entries(stats).map(([k, v]) => [
+            k,
+            typeof v === "object" ? JSON.stringify(v) : String(v),
+          ]);
+          this.printKeyValueList(entries);
         }
       } catch (err) {
         this.stopSpinner(false);
@@ -511,27 +430,26 @@ export class InteractiveCLI {
   private async executeClear(namespaceTarget?: string): Promise<void> {
     const targetNs = namespaceTarget ?? this.state.namespace;
     if (!this.handlers.onClear) {
-      this.printWarn("No 'onClear' handler registered. Connect via cli.setHandlers({ onClear: ... }).");
+      this.printWarn("No 'onClear' handler registered.");
       return;
     }
 
     if (!this.rl) return;
 
-    // Safety confirmation prompt
     const answer = await this.rl.question(
-      `${c.brightRed}⚠ CAUTION: Are you sure you want to wipe all records in namespace "${targetNs}"? (yes/no): ${c.reset}`,
+      `\n${c.rose}Wipe all vectors in "${targetNs}"? (yes/no): ${c.reset}`,
     );
 
     if (answer.trim().toLowerCase() !== "yes") {
-      this.printInfo("Clear operation cancelled.");
+      this.printInfo("Clear cancelled.");
       return;
     }
 
     this.startSpinner(`Wiping namespace "${targetNs}"...`);
     try {
       const msg = await this.handlers.onClear(targetNs);
-      this.stopSpinner(true, `Namespace "${targetNs}" cleared.`);
-      if (msg) console.log(msg);
+      this.stopSpinner(true, `Cleared "${targetNs}"`);
+      if (msg) console.log(`  ${c.muted}${msg}${c.reset}`);
     } catch (err) {
       this.stopSpinner(false);
       this.printError(`Failed to clear namespace "${targetNs}"`, err);
@@ -543,7 +461,7 @@ export class InteractiveCLI {
     const val = args[1];
 
     if (!key || !val) {
-      this.printWarn("Usage: /set <namespace|topk> <value>");
+      this.printWarn("Usage: /set <topk|ns> <value>");
       return;
     }
 
@@ -554,25 +472,25 @@ export class InteractiveCLI {
         return;
       }
       this.state.topK = parsed;
-      this.printSuccess(`topK updated to ${this.state.topK}`);
+      this.printSuccess(`topK set to ${this.state.topK}`);
     } else if (key === "namespace" || key === "ns") {
       this.state.namespace = val;
-      this.printSuccess(`Active namespace updated to "${this.state.namespace}"`);
+      this.printSuccess(`Namespace set to "${this.state.namespace}"`);
     } else {
-      this.printWarn(`Unknown setting: "${key}". Available settings: topK, namespace.`);
+      this.printWarn(`Unknown setting: "${key}". Available: topk, ns`);
     }
   }
 
-  // ─── SPINNER / LOADING UTILITY ─────────────────────────────────────────────
+  // ─── SPINNER ──────────────────────────────────────────────────────────────
 
   public startSpinner(message: string): void {
     this.stopSpinner();
-    output.write("\x1b[?25l"); // Hide cursor
+    output.write("\x1b[?25l");
 
     this.spinnerTimer = setInterval(() => {
       const frame = this.spinnerFrames[this.spinnerFrameIndex] ?? "⠋";
       this.spinnerFrameIndex = (this.spinnerFrameIndex + 1) % this.spinnerFrames.length;
-      output.write(`\r${c.cyan}${frame}${c.reset} ${message} `);
+      output.write(`\r${c.cyan}${frame}${c.reset} ${c.muted}${message}${c.reset} `);
     }, 80);
   }
 
@@ -580,111 +498,275 @@ export class InteractiveCLI {
     if (this.spinnerTimer) {
       clearInterval(this.spinnerTimer);
       this.spinnerTimer = null;
-      output.write("\r\x1b[2K"); // Clear current line
-      output.write("\x1b[?25h"); // Restore cursor
+      output.write("\r\x1b[2K");
+      output.write("\x1b[?25h");
 
       if (finalMessage) {
-        const symbol = success ? `${c.brightGreen}✔${c.reset}` : `${c.brightRed}✖${c.reset}`;
-        console.log(`${symbol} ${finalMessage}`);
+        const symbol = success ? `${c.emerald}✔${c.reset}` : `${c.rose}✖${c.reset}`;
+        console.log(`${symbol} ${c.muted}${finalMessage}${c.reset}`);
       }
     }
   }
 
-  // ─── FORMATTING & RENDERING HELPERS ───────────────────────────────────────
+  // ─── CLEAN & MINIMAL TUI RENDERING ────────────────────────────────────────
 
+  /**
+   * Minimal header banner
+   */
   public printBanner(): void {
-    const title = `   ⚡ ${this.config.appName} v${this.config.version} ⚡   `;
-    const line = "═".repeat(title.length);
-
-    console.log(`\n${c.brightCyan}╔${line}╗`);
-    console.log(`║${c.bold}${c.white}${title}${c.reset}${c.brightCyan}║`);
-    console.log(`╚${line}╝${c.reset}`);
-    console.log(`${c.dim}   ${this.config.bannerSubtitle}${c.reset}`);
-    console.log(`${c.dim}   Type ${c.bold}/help${c.reset}${c.dim} for commands, or type any prompt to ask a question.${c.reset}\n`);
+    console.log(`\n${c.bold}${this.config.appName}${c.reset} ${c.muted}v${this.config.version}${c.reset}`);
+    console.log(`${c.muted}${this.config.bannerSubtitle}${c.reset}`);
+    console.log(`${c.muted}───────────────────────────────────────────${c.reset}`);
+    console.log(`${c.muted}Type ${c.text}/help${c.muted} for commands, or type any prompt to ask.${c.reset}\n`);
   }
 
+  /**
+   * Minimal clean command reference
+   */
   public printHelp(): void {
-    console.log(`\n${c.bold}${c.brightYellow}AVAILABLE COMMANDS:${c.reset}`);
+    console.log(`\n${c.bold}Commands${c.reset}`);
     const commands: Array<[string, string]> = [
-      ["<question>", "Type natural language question directly to query the RAG pipeline"],
-      ["/ask <question>", "Explicitly ask a question to retrieve context & generate answer"],
-      ["/search <terms>", "Perform raw vector similarity search without LLM generation"],
-      ["/ingest <file> [title]", "Ingest, outline-parse, and chunk a PDF document into Pinecone"],
-      ["/set topk <num>", "Change the number of chunks retrieved (current: " + this.state.topK + ")"],
-      ["/set ns <name>", "Change the active vector namespace (current: " + this.state.namespace + ")"],
+      ["<question>", "Ask question directly to query the RAG pipeline"],
+      ["/ask <query>", "Explicitly query context & generate answer"],
+      ["/search <terms>", "Perform raw vector similarity search"],
+      ["/ingest <file>", "Parse & chunk a PDF into vector/doc stores"],
+      ["/set topk <n>", `Set retrieved chunk count (now: ${this.state.topK})`],
+      ["/set ns <name>", `Set active namespace (now: ${this.state.namespace})`],
       ["/status", "Display current configuration and database status"],
-      ["/clear [namespace]", "Wipe all records in the specified or current namespace"],
-      ["/cls, /clear", "Clear the terminal screen"],
-      ["/help, /?", "Show this help screen"],
-      ["/exit, /quit", "Exit the interactive CLI session"],
+      ["/clear [ns]", "Wipe all records in specified namespace"],
+      ["/cls", "Clear terminal screen"],
+      ["/help", "Show this help screen"],
+      ["/exit", "Exit session"],
     ];
 
     for (const [cmd, desc] of commands) {
-      console.log(`  ${c.cyan}${cmd.padEnd(25)}${c.reset} ${c.dim}${desc}${c.reset}`);
+      console.log(`  ${c.cyan}${cmd.padEnd(20)}${c.reset} ${c.muted}${desc}${c.reset}`);
     }
     console.log("");
   }
 
+  /**
+   * Clean source citation list
+   */
   public printSources(sources: ICLISourceMatch[]): void {
     if (sources.length === 0) {
-      console.log(`\n${c.dim}No matching chunks found.${c.reset}\n`);
+      console.log(`\n${c.muted}No sources found.${c.reset}\n`);
       return;
     }
 
-    console.log(`\n${c.bold}${c.magenta}📚 RETRIEVED SOURCES (${sources.length}):${c.reset}`);
+    console.log(`\n${c.bold}Sources${c.reset} ${c.muted}(${sources.length})${c.reset}`);
     sources.forEach((s, idx) => {
-      const scoreStr = `(Score: ${(s.score * 100).toFixed(1)}%)`;
-      const breadcrumb = s.breadcrumb || s.metadata?.breadcrumb || "No breadcrumb";
-      const snippet = s.text || s.metadata?.text || "";
-      const truncated = snippet.length > 250 ? snippet.slice(0, 250).replace(/\n/g, " ") + "..." : snippet.replace(/\n/g, " ");
+      const pct = (s.score * 100).toFixed(1);
+      const scoreBadge = s.score >= 0.85
+        ? `${c.emerald}${pct}%${c.reset}`
+        : `${c.amber}${pct}%${c.reset}`;
 
-      console.log(`  ${c.brightYellow}[${idx + 1}]${c.reset} ${c.bold}${breadcrumb}${c.reset} ${c.dim}${scoreStr}${c.reset}`);
-      console.log(`      ${c.dim}ID:${c.reset} ${c.gray}${s.id}${c.reset}`);
-      if (truncated) {
-        console.log(`      ${c.dim}"${truncated}"${c.reset}`);
+      const rawBreadcrumb = s.breadcrumb || s.metadata?.breadcrumb || "Document";
+      // Format breadcrumb cleanly: [Book > Ch > Sec] -> Book › Ch › Sec
+      const cleanBreadcrumb = rawBreadcrumb
+        .replace(/^\[|\]$/g, "")
+        .replace(/\s*>\s*/g, ` ${c.muted}›${c.reset} `);
+
+      const snippet = s.text || s.metadata?.text || "";
+      const cleanSnippet = snippet.length > 200
+        ? snippet.slice(0, 200).replace(/\s+/g, " ").trim() + "..."
+        : snippet.replace(/\s+/g, " ").trim();
+
+      console.log(`  ${c.cyan}${idx + 1}.${c.reset} ${c.text}${cleanBreadcrumb}${c.reset}  ${c.muted}(${scoreBadge}${c.muted})${c.reset}`);
+      console.log(`     ${c.muted}id:${s.id}${c.reset}`);
+      if (cleanSnippet) {
+        console.log(`     ${c.dim}${cleanSnippet}${c.reset}`);
       }
     });
     console.log("");
   }
 
-  public printResponseBox(title: string, content: string): void {
-    const width = Math.min(output.columns || 80, 80);
-    const border = "─".repeat(width - 4);
+  /**
+   * Parses markdown and converts it to ANSI-styled terminal output.
+   */
+  public formatMarkdown(raw: string): string[] {
+    const lines = raw.split("\n");
+    const formatted: string[] = [];
+    let inCodeBlock = false;
+    let codeLanguage = "";
 
-    console.log(`\n${c.cyan}┌─ ${c.bold}${title}${c.reset}${c.cyan} ${border.slice(title.length + 1)}┐${c.reset}`);
-    const lines = content.split("\n");
-    for (const l of lines) {
-      console.log(`${c.cyan}│${c.reset} ${l}`);
+    const formatInline = (text: string): string => {
+      return text
+        // Bold: **text** or __text__
+        .replace(/\*\*(.+?)\*\*/g, `${c.bold}$1${c.reset}`)
+        .replace(/__(.+?)__/g, `${c.bold}$1${c.reset}`)
+        // Italic: *text* or _text_
+        .replace(/(?<![\w*])\*([^*\n]+)\*(?![\w*])/g, `${c.italic}$1${c.reset}`)
+        .replace(/(?<![\w_])_([^_\n]+)_(?![\w_])/g, `${c.italic}$1${c.reset}`)
+        // Inline code: `code`
+        .replace(/`([^`\n]+)`/g, `${c.cyanBright}$1${c.reset}`)
+        // Links: [title](url)
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, `${c.underline}$1${c.reset} ${c.muted}($2)${c.reset}`);
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]!;
+
+      // Code block fences: ```lang
+      const codeFenceMatch = line.match(/^```(\w+)?/);
+      if (codeFenceMatch) {
+        if (!inCodeBlock) {
+          inCodeBlock = true;
+          codeLanguage = codeFenceMatch[1] || "";
+          const header = codeLanguage ? ` [${codeLanguage}]` : "";
+          formatted.push(`${c.muted}  ┌─${c.cyan}${header}${c.muted} ────────────────────────${c.reset}`);
+        } else {
+          inCodeBlock = false;
+          formatted.push(`${c.muted}  └────────────────────────────────${c.reset}`);
+        }
+        continue;
+      }
+
+      if (inCodeBlock) {
+        formatted.push(`${c.cyanBright}  │  ${line}${c.reset}`);
+        continue;
+      }
+
+      // Headings
+      if (line.startsWith("# ")) {
+        formatted.push(`${c.bold}${c.cyanBright}${line.slice(2).trim()}${c.reset}`);
+        continue;
+      }
+      if (line.startsWith("## ")) {
+        formatted.push(`${c.bold}${c.cyan}${line.slice(3).trim()}${c.reset}`);
+        continue;
+      }
+      if (line.startsWith("### ")) {
+        formatted.push(`${c.bold}${c.text}${line.slice(4).trim()}${c.reset}`);
+        continue;
+      }
+
+      // Horizontal rules
+      if (/^(\*{3,}|-{3,}|_{3,})$/.test(line.trim())) {
+        formatted.push(`${c.muted}${"─".repeat(40)}${c.reset}`);
+        continue;
+      }
+
+      // Blockquotes
+      if (line.startsWith("> ") || line === ">") {
+        const quoteText = line.startsWith("> ") ? line.slice(2) : "";
+        formatted.push(`${c.muted}▎ ${c.italic}${formatInline(quoteText)}${c.reset}`);
+        continue;
+      }
+
+      // Table separator row |---|---|
+      if (/^\|?(\s*:?-+:?\s*\|)+\s*:?-+:?\s*\|?$/.test(line.trim())) {
+        const colCount = line.split("|").filter((s) => s.trim().length > 0).length;
+        formatted.push(`${c.muted}  ${"─".repeat(Math.max(20, colCount * 16))}${c.reset}`);
+        continue;
+      }
+
+      // Table row | col1 | col2 |
+      if (/^\|(.+)\|$/.test(line.trim())) {
+        const cells = line.trim().slice(1, -1).split("|").map((cell) => cell.trim());
+        const formattedRow = cells
+          .map((cell) => formatInline(cell).padEnd(16))
+          .join(`${c.muted} │ ${c.reset}`);
+        formatted.push(`  ${formattedRow}`);
+        continue;
+      }
+
+      // Unordered lists (- item, * item, + item)
+      const bulletMatch = line.match(/^(\s*)([-*+])\s+(.+)$/);
+      if (bulletMatch) {
+        const indent = bulletMatch[1] || "";
+        const bulletIcon = indent.length > 0 ? "◦" : "•";
+        const bulletColor = indent.length > 0 ? c.muted : c.cyan;
+        formatted.push(`${indent}${bulletColor}${bulletIcon}${c.reset} ${formatInline(bulletMatch[3]!)}`);
+        continue;
+      }
+
+      // Numbered lists (1. item)
+      const numMatch = line.match(/^(\s*)(\d+)\.\s+(.+)$/);
+      if (numMatch) {
+        const indent = numMatch[1] || "";
+        const num = numMatch[2];
+        formatted.push(`${indent}${c.cyan}${num}.${c.reset} ${formatInline(numMatch[3]!)}`);
+        continue;
+      }
+
+      // Standard text line with inline formatting
+      formatted.push(formatInline(line));
     }
-    console.log(`${c.cyan}└${border}─┘${c.reset}\n`);
+
+    return formatted;
   }
 
-  public printBox(title: string, lines: string[]): void {
-    console.log(`\n${c.brightCyan}┌─ ${c.bold}${title}${c.reset}${c.brightCyan} ─────────────────────────────┐${c.reset}`);
+  /**
+   * Clean minimal response card with thin rounded borders and markdown rendering
+   */
+  public printResponseBox(title: string, content: string): void {
+    const width = Math.min(output.columns || 80, 80);
+    const innerWidth = width - 4;
+    const borderLine = "─".repeat(Math.max(10, innerWidth - title.length - 3));
+
+    console.log(`\n${c.muted}╭─ ${c.bold}${c.text}${title}${c.reset} ${c.muted}${borderLine}╮${c.reset}`);
+    const lines = this.formatMarkdown(content);
     for (const line of lines) {
-      console.log(`${c.brightCyan}│${c.reset}  ${line}`);
+      console.log(`${c.muted}│${c.reset}  ${line}`);
     }
-    console.log(`${c.brightCyan}└────────────────────────────────────────────────┘${c.reset}\n`);
+    console.log(`${c.muted}╰${"─".repeat(width - 2)}╯${c.reset}\n`);
+  }
+
+  /**
+   * Generic key-value card with rounded borders
+   */
+  public printCard(title: string, entries: Array<[string, string]>): void {
+    const width = Math.min(output.columns || 80, 70);
+    const borderLine = "─".repeat(Math.max(10, width - title.length - 6));
+
+    console.log(`\n${c.muted}╭─ ${c.bold}${c.text}${title}${c.reset} ${c.muted}${borderLine}╮${c.reset}`);
+    const maxKeyLen = Math.max(...entries.map(([k]) => k.length), 10);
+
+    for (const [key, val] of entries) {
+      console.log(`${c.muted}│${c.reset}  ${c.muted}${key.padEnd(maxKeyLen)}${c.reset}  ${val}`);
+    }
+    console.log(`${c.muted}╰${"─".repeat(width - 2)}╯${c.reset}\n`);
+  }
+
+  /**
+   * Generic box wrapper kept for backwards-compatibility
+   */
+  public printBox(title: string, lines: string[]): void {
+    const entries: Array<[string, string]> = lines.map((line) => {
+      const parts = line.split(/:\s+/);
+      const k = parts[0] ?? "";
+      const v = parts.slice(1).join(": ") || "";
+      return [k, v] as [string, string];
+    });
+    this.printCard(title, entries);
+  }
+
+  private printKeyValueList(entries: Array<[string, string]>): void {
+    const maxKeyLen = Math.max(...entries.map(([k]) => k.length), 12);
+    for (const [k, v] of entries) {
+      console.log(`  ${c.muted}${k.padEnd(maxKeyLen)}${c.reset}  ${v}`);
+    }
   }
 
   public printSuccess(msg: string): void {
-    console.log(`${c.brightGreen}✔${c.reset} ${msg}`);
+    console.log(`${c.emerald}✔${c.reset} ${msg}`);
   }
 
   public printWarn(msg: string): void {
-    console.log(`${c.brightYellow}⚠${c.reset} ${msg}`);
+    console.log(`${c.amber}!${c.reset} ${c.muted}${msg}${c.reset}`);
   }
 
   public printError(msg: string, error?: any): void {
-    console.log(`${c.brightRed}✖ ${msg}${c.reset}`);
+    console.log(`${c.rose}✖${c.reset} ${msg}`);
     if (error) {
       const errMsg = error?.message || String(error);
-      console.log(`  ${c.dim}${errMsg}${c.reset}`);
+      console.log(`  ${c.muted}${errMsg}${c.reset}`);
     }
   }
 
   public printInfo(msg: string): void {
-    console.log(`${c.brightBlue}ℹ${c.reset} ${msg}`);
+    console.log(`${c.cyan}ℹ${c.reset} ${c.muted}${msg}${c.reset}`);
   }
 
   private prompt(): void {
