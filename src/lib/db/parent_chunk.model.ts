@@ -52,7 +52,17 @@ const ParentChunkSchema = new Schema<IParentChunkDoc>(
 );
 
 // Compound index for querying sections of a specific book efficiently
-ParentChunkSchema.index({ "metadata.bookTitle": 1, "metadata.chapterNumber": 1 });
+ParentChunkSchema.index({
+  "metadata.bookTitle": 1,
+  "metadata.chapterNumber": 1,
+});
+
+// Full-text search index (requires "text" as index type)
+ParentChunkSchema.index({
+  text: "text",
+  "metadata.subtopicTitle": "text",
+  "metadata.chapterTitle": "text",
+});
 
 export const ParentChunkModel: Model<IParentChunkDoc> =
   (mongoose.models["ParentChunk"] as Model<IParentChunkDoc>) ||

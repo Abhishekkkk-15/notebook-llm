@@ -13,6 +13,8 @@ import { RateLimitRetry } from "../retry.js";
 import type { IParentChunkDoc } from "../db/parent_chunk.model.js";
 import type { IParentChunk } from "../../types/chunktypes.js";
 import { MemoryRegistory } from "./memory_registory.js";
+import { zodResponseFormat } from "openai/helpers/zod.mjs";
+import { keyword_schema } from "../schema.js";
 
 type TProvider = "AZURE" | "NVIDIA";
 const MODELS = {
@@ -117,6 +119,32 @@ export class LLM {
       return res.choices[0]?.message;
     } catch (error) {
       console.log("Error in Generation ", error);
+    }
+  }
+
+  async get_keyword(query: string): Promise<string[]> {
+    try {
+      const messages: ChatCompletionMessageParam[] = [
+        {
+          role: "system",
+          content:
+            "Extract high-quality keywords for full-text search from the user query.",
+        },
+        {
+          role: "user",
+          content: query,
+        },
+      ];
+
+      const res = await this.az_client.chat.completions.parse({
+        messages,
+        model: "gpt-5.6-luna",
+        response_format: zodResponseFormat(keyword_schema, "keyword"),
+      });
+      return res.choices[0]?.message.parsed?.keywords || [];
+    } catch (error) {
+      console.log("[Error in get_keywordfunciton]");
+      throw error;
     }
   }
 }

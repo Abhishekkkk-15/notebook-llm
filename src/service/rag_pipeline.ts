@@ -95,29 +95,14 @@ export class RAGPipeline {
   async query(option: IQueryOption) {
     const namespace = option.namespace ?? "child_chunks";
 
-    let userQueryEmbd = await this.llmClient.generate_embedding(
-      option.query,
-      "NVIDIA",
-      "query",
-    );
+    let full_content = await this.hybrid_search({ ...option, namespace });
 
-    if (!userQueryEmbd) {
-      throw new Error("Failed to generate embedding for the user query.");
+    if (!full_content || full_content.length === 0) {
+      return {
+        answer: "No relevant documents found matching your query. Please make sure the book has been ingested via /ingest.",
+        sources: [],
+      };
     }
-
-    let child_chunks = await this.pcStore.search(userQueryEmbd, {
-      namespace,
-      filter: option.filters,
-      topK: option.topK ?? 5,
-    });
-
-    const higheScoredChunks = child_chunks.filter((c) => c.score >= 0.5);
-
-    console.log(higheScoredChunks);
-
-    let parent_ids: string[] = child_chunks.map((c) => c.metadata.parentId);
-
-    let full_content = await this.parentStore.getParentsByIds(parent_ids);
 
     const user_message =
       "User Query : " +
@@ -130,12 +115,86 @@ export class RAGPipeline {
 
     return {
       answer: res?.content ?? undefined,
-      sources: child_chunks.map((c) => ({
-        id: c.id,
-        score: c.score,
+      sources: full_content.map((c) => ({
+        id: String(c.chunkId || c._id),
+        score: 0,
         breadcrumb: c.metadata.breadcrumb,
-        text: c.metadata.text,
+        text: c.text,
       })),
     };
+  }
+
+  // Hybrid Search: Pinecone Vector + MongoDB Text Search merged via RRF
+  async hybrid_search(option: IQueryOption) {
+    const namespace = option.namespace ?? "child_chunks";
+    const topK = option.topK ?? 5;
+
+    let userQueryEmbd = await this.llmClient.generate_embedding(
+      option.query,
+      "NVIDIA",
+      "query",
+    );
+
+    if (!userQueryEmbd) {
+      throw new Error("Failed to generate embedding for the user query.");
+    }
+
+    let keywords: string[] = [];
+    try {
+      keywords = await this.llmClient.get_keyword(option.query);
+    } catch (err) {
+      console.warn("[Hybrid Search] Could not extract LLM keywords, falling back to query terms.");
+    }
+
+    // If LLM returned no keywords, extract meaningful words from query
+    if (!keywords || keywords.length === 0) {
+      keywords = option.query
+        .split(/\s+/)
+        .map((w) => w.replace(/[^\w]/g, "").trim())
+        .filter((w) => w.length > 2);
+    }
+
+    const [keyword_hits, vector_hits] = await Promise.all([
+      this.parentStore.searchKeywordsAnd(keywords, topK),
+      this.pcStore.search(userQueryEmbd, { topK, namespace }),
+    ]);
+
+    const k = 60;
+    const score_map = new Map<string, number>();
+
+    // 1. Process dense vector hits from Pinecone
+    vector_hits.forEach((hit, rank) => {
+      const parentId = hit.metadata?.parentId;
+      if (parentId) {
+        score_map.set(
+          parentId,
+          (score_map.get(parentId) || 0) + 1 / (k + rank + 1),
+        );
+      }
+    });
+
+    // 2. Process sparse keyword hits from MongoDB
+    (keyword_hits || []).forEach((doc, rank) => {
+      const chunkId = doc.chunkId;
+      if (chunkId) {
+        score_map.set(
+          chunkId,
+          (score_map.get(chunkId) || 0) + 1 / (k + rank + 1),
+        );
+      }
+    });
+
+    // 3. Rank top unique parent IDs by combined RRF score
+    const topParentIds = Array.from(score_map.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, topK)
+      .map(([id]) => id)
+      .filter(Boolean);
+
+    if (topParentIds.length === 0) {
+      return [];
+    }
+
+    return await this.parentStore.getParentsByIds(topParentIds);
   }
 }

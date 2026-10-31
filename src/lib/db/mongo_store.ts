@@ -1,7 +1,10 @@
 import type { IParentChunk } from "../../types/chunktypes.js";
 
 import { connectMongo } from "./mongo.js";
-import { ParentChunkModel, type IParentChunkDoc } from "./parent_chunk.model.js";
+import {
+  ParentChunkModel,
+  type IParentChunkDoc,
+} from "./parent_chunk.model.js";
 
 /**
  * ============================================================================
@@ -18,11 +21,21 @@ import { ParentChunkModel, type IParentChunkDoc } from "./parent_chunk.model.js"
  *    to retrieve the full parent content for synthesis.
  */
 export class MongoParentStore {
+  private static indexesEnsured = false;
+
   /**
-   * Ensures MongoDB connection before executing operations.
+   * Ensures MongoDB connection and indexes before executing operations.
    */
   private async ensureConnected(): Promise<void> {
     await connectMongo();
+    if (!MongoParentStore.indexesEnsured) {
+      try {
+        await ParentChunkModel.createIndexes();
+        MongoParentStore.indexesEnsured = true;
+      } catch (err) {
+        console.warn("[MongoDB] Warning while ensuring indexes:", err);
+      }
+    }
   }
 
   /**
@@ -109,8 +122,8 @@ export class MongoParentStore {
     await this.ensureConnected();
     if (chunkIds.length === 0) return [];
 
-    // Deduplicate IDs
-    const uniqueIds = Array.from(new Set(chunkIds));
+    // Deduplicate IDs and remove nulls/undefined
+    const uniqueIds = Array.from(new Set(chunkIds)).filter(Boolean);
     return await ParentChunkModel.find({
       chunkId: { $in: uniqueIds },
     }).exec();
@@ -154,6 +167,47 @@ export class MongoParentStore {
   async countParents(filter?: Record<string, any>): Promise<number> {
     await this.ensureConnected();
     return await ParentChunkModel.countDocuments(filter || {});
+  }
+
+  /**
+   * Full-text keyword search across parent chunks using MongoDB $text index.
+   */
+  async searchKeywordsAnd(
+    keywords: string[],
+    limit = 5,
+  ): Promise<IParentChunkDoc[]> {
+    await this.ensureConnected();
+
+    if (!keywords || keywords.length === 0) {
+      return [];
+    }
+
+    // Do NOT force quotes around every term: space-separated terms act as an OR search
+    // ranked by relevance (textScore), which prevents strict zero-match failures
+    const searchString = keywords
+      .map((kw) => kw.replace(/[",*]/g, "").trim())
+      .filter((kw) => kw.length > 0)
+      .join(" ");
+
+    if (!searchString.trim()) {
+      return [];
+    }
+
+    try {
+      return (await ParentChunkModel.find(
+        { $text: { $search: searchString } },
+        { score: { $meta: "textScore" } },
+      )
+        .sort({ score: { $meta: "textScore" } })
+        .limit(limit)
+        .exec()) as unknown as (IParentChunkDoc & { score: number })[];
+    } catch (err: any) {
+      if (err?.message?.includes("text index required")) {
+        console.warn("[MongoDB] Building text index now, please retry in a moment...");
+        await ParentChunkModel.createIndexes();
+      }
+      return [];
+    }
   }
 }
 
