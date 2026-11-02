@@ -3,7 +3,13 @@ import * as p from "@clack/prompts";
 import { RAGPipeline } from "../service/rag_pipeline.js";
 import type { IProjectDoc } from "../lib/db/project.model.js";
 import { pickPdfFile } from "./file_picker.js";
-import { printAnswerCard, renderMarkdown, c } from "./markdown.js";
+import {
+  printAnswerCard,
+  renderMarkdown,
+  renderChunkWithImages,
+  openImageInSystemViewer,
+  c,
+} from "./markdown.js";
 
 export class InteractiveTUI {
   private activeProject: IProjectDoc | null = null;
@@ -41,15 +47,15 @@ export class InteractiveTUI {
    */
   private renderHeader(): void {
     console.clear();
+    const termWidth = Math.max(40, (process.stdout.columns || 80) - 2);
     const projName = this.activeProject ? this.activeProject.name : "None (Select a project)";
     const projStats = this.activeProject
-      ? `[${this.activeProject.fileName} • ${this.activeProject.totalPages} pgs • ${this.activeProject.totalChildren} vectors • ${this.activeProject.totalImages} imgs]`
+      ? `\x1b[90m(${this.activeProject.fileName} • ${this.activeProject.totalPages} pgs • ${this.activeProject.totalChildren} chunks • ${this.activeProject.totalImages} imgs)\x1b[0m`
       : "";
 
-    console.log(`\x1b[36m╭──────────────────────────────────────────────────────────────────────────╮\x1b[0m`);
-    console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37mNotebook-LLM\x1b[0m \x1b[90m| Interactive Multimodal RAG CLI\x1b[0m                            \x1b[36m│\x1b[0m`);
-    console.log(`\x1b[36m│\x1b[0m  \x1b[90mActive Project:\x1b[0m \x1b[33m\x1b[1m${projName}\x1b[0m \x1b[90m${projStats}\x1b[0m`);
-    console.log(`\x1b[36m╰──────────────────────────────────────────────────────────────────────────╯\x1b[0m\n`);
+    console.log(`\x1b[36m╭─ \x1b[1m\x1b[37mNotebook-LLM\x1b[0m \x1b[90m• Interactive Multimodal RAG CLI\x1b[0m`);
+    console.log(`\x1b[36m│\x1b[0m  \x1b[90mActive Project:\x1b[0m \x1b[33m\x1b[1m${projName}\x1b[0m ${projStats}`);
+    console.log(`\x1b[36m╰${"─".repeat(termWidth)}\x1b[0m\n`);
   }
 
   /**
@@ -151,9 +157,10 @@ export class InteractiveTUI {
     }
 
     console.clear();
-    console.log(`\x1b[36m╭─ 💬 Q&A Mode: \x1b[1m\x1b[33m${this.activeProject.name}\x1b[0m \x1b[36m────────────────────────────╮\x1b[0m`);
-    console.log(`\x1b[36m│\x1b[0m  \x1b[90mType your question below. Press Enter on an empty line or type '/menu' to exit.\x1b[0m \x1b[36m│\x1b[0m`);
-    console.log(`\x1b[36m╰──────────────────────────────────────────────────────────────────────╯\x1b[0m\n`);
+    const termWidth = Math.max(40, (process.stdout.columns || 80) - 2);
+    console.log(`\x1b[36m╭─ 💬 Q&A Mode: \x1b[1m\x1b[33m${this.activeProject.name}\x1b[0m`);
+    console.log(`\x1b[36m│\x1b[0m  \x1b[90mType your question below. Press Enter on an empty line or type '/menu' to exit.\x1b[0m`);
+    console.log(`\x1b[36m╰${"─".repeat(termWidth)}\x1b[0m\n`);
 
     while (true) {
       const question = await p.text({
@@ -201,6 +208,8 @@ export class InteractiveTUI {
             }
           });
           console.log("\n" + "─".repeat(60) + "\n");
+
+          await this.inspectSourceChunks(response.sources);
         }
       } catch (err: any) {
         s.stop("Query failed");
@@ -251,11 +260,119 @@ export class InteractiveTUI {
         console.log("");
       });
 
-      await this.pressEnterToContinue();
+      if (results && results.length > 0) {
+        await this.inspectSourceChunks(
+          results.map((r) => ({
+            id: r.chunkId,
+            breadcrumb: r.metadata.breadcrumb,
+            text: r.text,
+            score: (r as any).rrfScore || 0,
+            images: r.metadata.images || [],
+            imageUrls: r.metadata.imageUrls || [],
+          })),
+        );
+      } else {
+        await this.pressEnterToContinue();
+      }
     } catch (err: any) {
       s.stop("Search failed");
       p.log.error(`Search Error: ${err.message || String(err)}`);
       await this.pressEnterToContinue();
+    }
+  }
+
+  /**
+   * Lets user interactively choose and view individual retrieved source chunks
+   * in complete detail, rendering full text, tables, and live terminal images.
+   */
+  private async inspectSourceChunks(
+    sources: Array<{
+      id: string;
+      breadcrumb?: string;
+      text?: string;
+      score: number;
+      images?: any[];
+      imageUrls?: string[];
+    }>,
+  ): Promise<void> {
+    if (!sources || sources.length === 0) return;
+
+    while (true) {
+      const options = [
+        {
+          value: "skip",
+          label: "⬅️  Continue (Skip inspection)",
+          hint: "Return",
+        },
+        ...sources.map((s, idx) => ({
+          value: String(idx),
+          label: `[${idx + 1}] ${s.breadcrumb || s.id}`,
+          hint: `Score: ${s.score.toFixed(4)}${s.imageUrls && s.imageUrls.length > 0 ? ` • 📸 ${s.imageUrls.length} img` : ""}`,
+        })),
+      ];
+
+      const selected = await p.select({
+        message: "Inspect a retrieved section in detail?",
+        options,
+      });
+
+      if (p.isCancel(selected) || selected === "skip") {
+        break;
+      }
+
+      const chunk = sources[Number(selected)];
+      if (!chunk) continue;
+
+      const termWidth = Math.max(40, (process.stdout.columns || 80) - 2);
+
+      console.clear();
+      console.log(`\x1b[36m╭─ \x1b[1m\x1b[33m${chunk.breadcrumb || chunk.id}\x1b[0m`);
+      console.log(
+        `\x1b[36m│\x1b[0m  \x1b[90mChunk ID: ${chunk.id} • RRF Score: ${chunk.score.toFixed(4)}\x1b[0m`,
+      );
+      console.log(`\x1b[36m╰${"─".repeat(termWidth)}\x1b[0m\n`);
+
+      // Render full parent chunk text, tables, and live terminal images!
+      await renderChunkWithImages(
+        chunk.text || "No content available for this section.",
+      );
+
+      console.log(`\x1b[90m${"─".repeat(termWidth)}\x1b[0m\n`);
+
+      // If the chunk has images, offer to launch in native 4K viewer
+      const chunkImages = chunk.imageUrls || [];
+      if (chunkImages.length > 0) {
+        const nextAction = await p.select({
+          message: "Actions for this section:",
+          options: [
+            { value: "back", label: "⬅️  Return to chunk list", hint: "Back" },
+            ...chunkImages.map((img, i) => ({
+              value: `open_${i}`,
+              label: `🖼️  Open Image ${i + 1} in System Viewer (Full 4K Clarity)`,
+              hint: path.basename(img),
+            })),
+          ],
+        });
+
+        if (
+          !p.isCancel(nextAction) &&
+          typeof nextAction === "string" &&
+          nextAction.startsWith("open_")
+        ) {
+          const imgIndex = Number(nextAction.replace("open_", ""));
+          const targetImg = chunkImages[imgIndex];
+          if (targetImg) {
+            openImageInSystemViewer(targetImg);
+            p.log.success(
+              `Opened ${path.basename(targetImg)} in system image viewer!`,
+            );
+            await this.pressEnterToContinue();
+          }
+        }
+      } else {
+        await this.pressEnterToContinue("Press Enter to return to chunk list...");
+      }
+      console.clear();
     }
   }
 

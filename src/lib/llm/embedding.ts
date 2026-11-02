@@ -109,8 +109,7 @@ export class LLM {
       const messages = await this.memory_store.get_message();
       let res = await this.az_client.chat.completions.create({
         messages,
-        model: "gpt-5.6-luna",
-        temperature: 0.3,
+        model: "gpt-5.6-luna"
       });
 
       this.memory_store.assistent(

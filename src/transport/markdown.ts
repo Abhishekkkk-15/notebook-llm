@@ -1,3 +1,8 @@
+import fs from "fs";
+import path from "path";
+import { exec } from "child_process";
+import terminalImage from "terminal-image";
+
 export const c = {
   reset: "\x1b[0m",
   bold: "\x1b[1m",
@@ -177,8 +182,107 @@ export function renderMarkdown(raw: string): string {
 }
 
 export function printAnswerCard(title: string, markdownContent: string): void {
+  const termWidth = Math.max(40, (process.stdout.columns || 80) - 2);
   const rendered = renderMarkdown(markdownContent);
-  console.log(`\n${c.muted}╭─ ${c.bold}${c.cyanBright}${title}${c.reset} ${c.muted}${"─".repeat(45)}╮${c.reset}\n`);
+  console.log(`\n\x1b[36m╭─ \x1b[1m\x1b[96m${title}\x1b[0m`);
   console.log(rendered);
-  console.log(`\n${c.muted}╰${"─".repeat(60)}╯${c.reset}\n`);
+  console.log(`\x1b[90m╰${"─".repeat(termWidth)}\x1b[0m\n`);
+}
+
+/**
+ * Opens a local image in the user's OS native image viewer (Preview on macOS,
+ * eog/feh on Linux, Photos on Windows) in full resolution.
+ */
+export function openImageInSystemViewer(imagePath: string): boolean {
+  const absPath = path.isAbsolute(imagePath)
+    ? imagePath
+    : path.resolve(process.cwd(), imagePath);
+
+  if (!fs.existsSync(absPath)) return false;
+
+  const cmd =
+    process.platform === "darwin"
+      ? `open "${absPath}"`
+      : process.platform === "win32"
+        ? `start "" "${absPath}"`
+        : `xdg-open "${absPath}"`;
+
+  try {
+    exec(cmd, () => {});
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Renders full markdown text, dynamically replacing image placeholders
+ * like `![Figure caption](assets/images/...)` with real terminal graphics.
+ */
+export async function renderChunkWithImages(rawText: string): Promise<void> {
+  const lines = rawText.split("\n");
+  const textBuffer: string[] = [];
+  const imageRegex = /!\[([^\]]*)\]\(([^)]+)\)/;
+  const termWidth = Math.max(40, (process.stdout.columns || 80) - 2);
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const match = line.match(imageRegex);
+
+    if (match) {
+      // 1. Flush and render any preceding text before the image
+      if (textBuffer.length > 0) {
+        console.log(renderMarkdown(textBuffer.join("\n")));
+        textBuffer.length = 0;
+      }
+
+      const caption = match[1] || "Figure";
+      const imgPath = match[2]!;
+      const resolvedPath = path.isAbsolute(imgPath)
+        ? imgPath
+        : path.resolve(process.cwd(), imgPath);
+
+      // Check if next lines contain duplicate caption (e.g. **Figure 1-6...**)
+      while (
+        i + 1 < lines.length &&
+        (!lines[i + 1]!.trim() ||
+          lines[i + 1]!.toLowerCase().includes(caption.toLowerCase()))
+      ) {
+        i++;
+      }
+
+      // 2. Print Figure Card with sleek Left-Rail styling
+      console.log(`\n\x1b[32m╭── 📸 Figure: \x1b[1m${caption}\x1b[0m`);
+      console.log(`\x1b[32m│\x1b[0m   \x1b[90mSource File: file://${resolvedPath}\x1b[0m`);
+
+      if (fs.existsSync(resolvedPath)) {
+        try {
+          const imgWidth = Math.min(termWidth - 8, 120);
+          const renderedImg = await terminalImage.file(resolvedPath, {
+            width: imgWidth,
+            preferNativeRender: false, // Ensures consistent ANSI TrueColor RGB rendering across all terminals
+          });
+          if (renderedImg) {
+            console.log(`\x1b[32m│\x1b[0m`);
+            console.log(renderedImg);
+          }
+          console.log(`\x1b[32m│\x1b[0m`);
+          console.log(`\x1b[32m│\x1b[0m   \x1b[36m💡 Select this chunk in inspector to open in 4K native viewer\x1b[0m`);
+        } catch (err: any) {
+          console.log(`\x1b[32m│\x1b[0m   \x1b[90m(Preview unavailable: ${err.message})\x1b[0m`);
+        }
+      } else {
+        console.log(`\x1b[32m│\x1b[0m   \x1b[90m(Image file not found at: ${resolvedPath})\x1b[0m`);
+      }
+
+      console.log(`\x1b[32m╰${"─".repeat(termWidth)}\x1b[0m\n`);
+    } else {
+      textBuffer.push(line);
+    }
+  }
+
+  // 3. Flush any remaining text at the end of the chunk
+  if (textBuffer.length > 0) {
+    console.log(renderMarkdown(textBuffer.join("\n")));
+  }
 }

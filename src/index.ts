@@ -1,3 +1,4 @@
+process.env.FORCE_COLOR = process.env.FORCE_COLOR || "3";
 import { config } from "dotenv";
 import dns from "node:dns";
 import { RAGPipeline } from "./service/rag_pipeline.js";
