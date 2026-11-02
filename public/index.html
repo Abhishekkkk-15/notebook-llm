@@ -180,13 +180,33 @@
       <!-- Right Header Actions (Project Selector + Health Badge) -->
       <div class="flex items-center space-x-3">
         
-        <!-- Project Selector Dropdown -->
-        <div class="relative">
-          <select id="project-selector" class="appearance-none bg-white border border-stone-200 rounded-lg pl-3 pr-8 py-1.5 text-xs font-medium text-stone-800 shadow-sm hover:border-stone-300 focus:outline-none focus:ring-2 focus:ring-stone-400/20 cursor-pointer max-w-[240px] truncate">
-            <option value="" disabled selected>Loading projects...</option>
-          </select>
-          <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-stone-400">
-            <i data-lucide="chevrons-up-down" class="w-3.5 h-3.5"></i>
+        <!-- Custom Project Selector Dropdown (Shadcn style) -->
+        <div class="relative" id="custom-project-dropdown">
+          <button 
+            type="button"
+            id="custom-project-btn" 
+            onclick="toggleProjectDropdown()" 
+            class="inline-flex items-center justify-between space-x-2 bg-white hover:bg-stone-50 border border-stone-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-stone-800 shadow-xs hover:border-stone-300 focus:outline-none focus:ring-2 focus:ring-stone-400/20 transition-all max-w-[260px]"
+          >
+            <div class="flex items-center space-x-2 truncate">
+              <i data-lucide="book" class="w-3.5 h-3.5 text-amber-700 shrink-0"></i>
+              <span id="custom-project-label" class="truncate font-medium">Select a project...</span>
+            </div>
+            <i data-lucide="chevrons-up-down" id="project-chevron" class="w-3.5 h-3.5 text-stone-400 shrink-0 transition-transform duration-200"></i>
+          </button>
+
+          <!-- Floating Popover Menu -->
+          <div 
+            id="custom-project-menu" 
+            class="absolute right-0 top-full mt-1.5 w-72 bg-white border border-stone-200 rounded-xl shadow-lg p-1.5 hidden z-50 transition-all duration-150 transform scale-95 opacity-0 origin-top-right"
+          >
+            <div class="px-2 py-1.5 text-[10px] font-semibold text-stone-400 uppercase tracking-wider border-b border-stone-100 mb-1 flex items-center justify-between">
+              <span>Select Active Book</span>
+              <span id="project-count-badge" class="bg-stone-100 text-stone-600 px-1.5 py-0.5 rounded text-[9px]">0</span>
+            </div>
+            <div id="custom-project-options" class="max-h-60 overflow-y-auto space-y-0.5 pr-0.5">
+              <!-- Injected dynamically -->
+            </div>
           </div>
         </div>
 
@@ -346,11 +366,37 @@
           
           <div class="flex items-center space-x-2">
             <label class="text-xs text-stone-500 font-medium whitespace-nowrap">Top-K:</label>
-            <select id="search-topk" class="bg-stone-50 border border-stone-200 rounded-xl px-2.5 py-2 text-xs font-medium text-stone-800">
-              <option value="3">3 Chunks</option>
-              <option value="5" selected>5 Chunks</option>
-              <option value="10">10 Chunks</option>
-            </select>
+            
+            <!-- Custom Top-K Dropdown (Shadcn style) -->
+            <div class="relative inline-block" id="custom-topk-dropdown">
+              <button 
+                type="button"
+                id="custom-topk-btn" 
+                onclick="toggleTopkDropdown()" 
+                class="inline-flex items-center justify-between space-x-2 bg-stone-50 hover:bg-stone-100 border border-stone-200 rounded-xl px-3 py-2 text-xs font-semibold text-stone-800 shadow-xs focus:outline-none focus:ring-2 focus:ring-stone-400/20 transition-all min-w-[110px]"
+              >
+                <span id="custom-topk-label">5 Chunks</span>
+                <i data-lucide="chevron-down" id="topk-chevron" class="w-3.5 h-3.5 text-stone-400 shrink-0 transition-transform duration-200"></i>
+              </button>
+
+              <div 
+                id="custom-topk-menu" 
+                class="absolute left-0 top-full mt-1 w-36 bg-white border border-stone-200 rounded-xl shadow-lg p-1 hidden z-50 transition-all duration-150 transform scale-95 opacity-0 origin-top-left"
+              >
+                <div onclick="selectTopk(3)" class="topk-option flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium text-stone-700 hover:bg-beige-100/70 hover:text-stone-900 cursor-pointer">
+                  <span>3 Chunks</span>
+                  <i data-lucide="check" class="w-3.5 h-3.5 text-amber-800 opacity-0" id="topk-check-3"></i>
+                </div>
+                <div onclick="selectTopk(5)" class="topk-option flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium text-stone-700 hover:bg-beige-100/70 hover:text-stone-900 cursor-pointer bg-beige-50">
+                  <span>5 Chunks</span>
+                  <i data-lucide="check" class="w-3.5 h-3.5 text-amber-800" id="topk-check-5"></i>
+                </div>
+                <div onclick="selectTopk(10)" class="topk-option flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium text-stone-700 hover:bg-beige-100/70 hover:text-stone-900 cursor-pointer">
+                  <span>10 Chunks</span>
+                  <i data-lucide="check" class="w-3.5 h-3.5 text-amber-800 opacity-0" id="topk-check-10"></i>
+                </div>
+              </div>
+            </div>
             
             <button type="submit" class="px-5 py-2 bg-stone-900 hover:bg-stone-800 text-white text-xs font-semibold rounded-xl shadow-xs transition-colors flex items-center space-x-1.5">
               <span>Search</span>
@@ -591,29 +637,141 @@
       }
     }
 
+    let selectedTopK = 5;
+
+    // Custom Project Dropdown Logic
+    function toggleProjectDropdown() {
+      const menu = document.getElementById("custom-project-menu");
+      const chevron = document.getElementById("project-chevron");
+      const isHidden = menu.classList.contains("hidden");
+
+      if (isHidden) {
+        menu.classList.remove("hidden");
+        requestAnimationFrame(() => {
+          menu.classList.remove("scale-95", "opacity-0");
+          menu.classList.add("scale-100", "opacity-100");
+          chevron.classList.add("rotate-180");
+        });
+      } else {
+        closeProjectDropdown();
+      }
+    }
+
+    function closeProjectDropdown() {
+      const menu = document.getElementById("custom-project-menu");
+      const chevron = document.getElementById("project-chevron");
+      if (!menu || menu.classList.contains("hidden")) return;
+
+      menu.classList.remove("scale-100", "opacity-100");
+      menu.classList.add("scale-95", "opacity-0");
+      chevron.classList.remove("rotate-180");
+      setTimeout(() => {
+        menu.classList.add("hidden");
+      }, 150);
+    }
+
+    // Custom Top-K Dropdown Logic
+    function toggleTopkDropdown() {
+      const menu = document.getElementById("custom-topk-menu");
+      const chevron = document.getElementById("topk-chevron");
+      const isHidden = menu.classList.contains("hidden");
+
+      if (isHidden) {
+        menu.classList.remove("hidden");
+        requestAnimationFrame(() => {
+          menu.classList.remove("scale-95", "opacity-0");
+          menu.classList.add("scale-100", "opacity-100");
+          chevron.classList.add("rotate-180");
+        });
+      } else {
+        closeTopkDropdown();
+      }
+    }
+
+    function closeTopkDropdown() {
+      const menu = document.getElementById("custom-topk-menu");
+      const chevron = document.getElementById("topk-chevron");
+      if (!menu || menu.classList.contains("hidden")) return;
+
+      menu.classList.remove("scale-100", "opacity-100");
+      menu.classList.add("scale-95", "opacity-0");
+      chevron.classList.remove("rotate-180");
+      setTimeout(() => {
+        menu.classList.add("hidden");
+      }, 150);
+    }
+
+    function selectTopk(val) {
+      selectedTopK = val;
+      document.getElementById("custom-topk-label").textContent = `${val} Chunks`;
+
+      [3, 5, 10].forEach((v) => {
+        const check = document.getElementById(`topk-check-${v}`);
+        if (check) {
+          if (v === val) {
+            check.classList.remove("opacity-0");
+          } else {
+            check.classList.add("opacity-0");
+          }
+        }
+      });
+
+      closeTopkDropdown();
+    }
+
+    // Global Click-Outside to close open dropdowns
+    window.addEventListener("click", (e) => {
+      const projDropdown = document.getElementById("custom-project-dropdown");
+      if (projDropdown && !projDropdown.contains(e.target)) {
+        closeProjectDropdown();
+      }
+      const topkDropdown = document.getElementById("custom-topk-dropdown");
+      if (topkDropdown && !topkDropdown.contains(e.target)) {
+        closeTopkDropdown();
+      }
+    });
+
     async function loadProjects() {
       try {
         const res = await fetch("/api/projects");
         const json = await res.json();
         allProjects = json.data || [];
 
-        const selector = document.getElementById("project-selector");
-        selector.innerHTML = "";
+        const optionsContainer = document.getElementById("custom-project-options");
+        const countBadge = document.getElementById("project-count-badge");
+        if (countBadge) countBadge.textContent = allProjects.length;
+
+        optionsContainer.innerHTML = "";
 
         if (allProjects.length === 0) {
-          selector.innerHTML = `<option value="">No projects found (Ingest first)</option>`;
+          optionsContainer.innerHTML = `
+            <div class="px-3 py-2 text-xs text-stone-400 text-center">
+              No projects found. Please ingest a PDF first.
+            </div>
+          `;
+          document.getElementById("custom-project-label").textContent = "No projects found";
           switchTab('ingest');
           return;
         }
 
         allProjects.forEach((proj) => {
-          const opt = document.createElement("option");
-          opt.value = proj.projectId;
-          opt.textContent = `${proj.name} (${proj.totalPages} pgs)`;
-          selector.appendChild(opt);
+          const item = document.createElement("div");
+          item.id = `proj-opt-${proj.projectId}`;
+          item.className = "flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium text-stone-700 hover:bg-beige-100/70 hover:text-stone-900 cursor-pointer transition-colors group";
+          item.onclick = () => {
+            selectProject(proj.projectId);
+            closeProjectDropdown();
+          };
+          item.innerHTML = `
+            <div class="truncate pr-2">
+              <span class="font-bold text-stone-900 block truncate">${escapeHtml(proj.name)}</span>
+              <span class="text-[10px] text-stone-400 block">${proj.totalPages} pgs • ${proj.totalChildren} vectors</span>
+            </div>
+            <i data-lucide="check" class="w-3.5 h-3.5 text-amber-800 shrink-0 opacity-0" id="proj-check-${proj.projectId}"></i>
+          `;
+          optionsContainer.appendChild(item);
         });
 
-        selector.onchange = (e) => selectProject(e.target.value);
         selectProject(allProjects[0].projectId);
       } catch (err) {
         console.error("Failed to load projects:", err);
@@ -624,7 +782,22 @@
       currentProject = allProjects.find((p) => p.projectId === projectId);
       if (!currentProject) return;
 
-      document.getElementById("project-selector").value = projectId;
+      document.getElementById("custom-project-label").textContent = currentProject.name;
+
+      // Update checkmarks in options
+      allProjects.forEach((p) => {
+        const opt = document.getElementById(`proj-opt-${p.projectId}`);
+        const check = document.getElementById(`proj-check-${p.projectId}`);
+        if (opt && check) {
+          if (p.projectId === projectId) {
+            opt.classList.add("bg-beige-100/60", "text-stone-900");
+            check.classList.remove("opacity-0");
+          } else {
+            opt.classList.remove("bg-beige-100/60", "text-stone-900");
+            check.classList.add("opacity-0");
+          }
+        }
+      });
 
       // Update Header Stats Bar
       const statsBar = document.getElementById("project-stats-bar");
@@ -637,6 +810,9 @@
 
       // Preload Table of Contents & Visuals
       loadTableOfContents();
+      loadVisualGallery();
+      lucide.createIcons();
+    }
       loadVisualGallery();
     }
 
@@ -877,7 +1053,7 @@
       if (e) e.preventDefault();
       const input = document.getElementById("search-input");
       const query = input.value.trim();
-      const topK = Number(document.getElementById("search-topk").value) || 5;
+      const topK = selectedTopK || 5;
 
       if (!query || !currentProject) return;
 
