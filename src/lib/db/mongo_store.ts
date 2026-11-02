@@ -54,33 +54,27 @@ export class MongoParentStore {
           metadata: parent.metadata,
         },
       },
-      { upsert: true, new: true, setDefaultsOnInsert: true },
+      { upsert: true, returnDocument: "after", setDefaultsOnInsert: true },
     );
 
     return result!;
   }
 
   /**
-   * Bulk upserts multiple parent chunks using batch bulkWrite operations.
+   * Bulk upsert parent chunks in batches.
    */
   async upsertParents(
     parents: IParentChunk[],
-    options?: { batchSize?: number },
+    batchSize = 50,
   ): Promise<{ upsertedCount: number; modifiedCount: number }> {
     await this.ensureConnected();
 
-    if (parents.length === 0) {
-      return { upsertedCount: 0, modifiedCount: 0 };
-    }
-
-    const batchSize = options?.batchSize ?? 100;
     let totalUpserted = 0;
     let totalModified = 0;
 
     for (let i = 0; i < parents.length; i += batchSize) {
-      const batch = parents.slice(i, i + batchSize);
-
-      const ops = batch.map((parent) => ({
+      const slice = parents.slice(i, i + batchSize);
+      const operations = slice.map((parent) => ({
         updateOne: {
           filter: { chunkId: parent.id },
           update: {
@@ -95,7 +89,9 @@ export class MongoParentStore {
         },
       }));
 
-      const res = await ParentChunkModel.bulkWrite(ops);
+      const res = await ParentChunkModel.bulkWrite(operations, {
+        ordered: false,
+      });
       totalUpserted += res.upsertedCount;
       totalModified += res.modifiedCount;
     }
@@ -142,6 +138,18 @@ export class MongoParentStore {
   }
 
   /**
+   * Retrieve all parent chunks belonging to a specific project.
+   */
+  async getParentsByProject(projectId: string): Promise<IParentChunkDoc[]> {
+    await this.ensureConnected();
+    return await ParentChunkModel.find({
+      "metadata.projectId": projectId,
+    })
+      .sort({ "metadata.chapterNumber": 1 })
+      .exec();
+  }
+
+  /**
    * Delete a parent chunk by chunk ID.
    */
   async deleteParentById(chunkId: string): Promise<boolean> {
@@ -162,6 +170,17 @@ export class MongoParentStore {
   }
 
   /**
+   * Delete all parent chunks of a project.
+   */
+  async deleteParentsByProject(projectId: string): Promise<number> {
+    await this.ensureConnected();
+    const res = await ParentChunkModel.deleteMany({
+      "metadata.projectId": projectId,
+    });
+    return res.deletedCount;
+  }
+
+  /**
    * Get the total count of parent chunks stored.
    */
   async countParents(filter?: Record<string, any>): Promise<number> {
@@ -175,6 +194,7 @@ export class MongoParentStore {
   async searchKeywordsAnd(
     keywords: string[],
     limit = 5,
+    filter?: Record<string, any>,
   ): Promise<IParentChunkDoc[]> {
     await this.ensureConnected();
 
@@ -193,9 +213,14 @@ export class MongoParentStore {
       return [];
     }
 
+    const query: Record<string, any> = {
+      $text: { $search: searchString },
+      ...(filter || {}),
+    };
+
     try {
       return (await ParentChunkModel.find(
-        { $text: { $search: searchString } },
+        query,
         { score: { $meta: "textScore" } },
       )
         .sort({ score: { $meta: "textScore" } })

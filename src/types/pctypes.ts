@@ -1,6 +1,7 @@
 import type { RecordMetadata } from "@pinecone-database/pinecone";
 
 export interface IChunkPineconeMetadata extends RecordMetadata {
+  projectId: string;
   parentId: string;
   text: string;
   tokenCount: number;

@@ -32,6 +32,7 @@ export class PinconeStore {
       id: chunk.id,
       values: vector,
       metadata: {
+        projectId: chunk.metadata.projectId ?? "",
         parentId: chunk.parentId,
         text: chunk.text,
         tokenCount: chunk.tokenCount,
@@ -112,6 +113,14 @@ export class PinconeStore {
   async deleteByIds(ids: string[], namespace?: string) {
     const ns = this.index.namespace(namespace ?? this.defaultNamespace);
     await ns.deleteMany(ids);
+  }
+
+  /**
+   * Delete all vectors belonging to a specific project
+   */
+  async deleteByProjectId(projectId: string, namespace?: string) {
+    const ns = this.index.namespace(namespace ?? this.defaultNamespace);
+    await ns.deleteMany({ filter: { projectId: { $eq: projectId } } });
   }
 
   /**

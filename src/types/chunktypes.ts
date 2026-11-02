@@ -11,6 +11,7 @@ export interface IImageMetadata {
 }
 
 export type TMetadata = {
+  projectId?: string;
   bookTitle: string;
   chapterNumber: number;
   chapterTitle: string;
@@ -39,6 +40,7 @@ export interface IParentChunk {
 }
 
 export interface ChunkingConfig {
+  projectId?: string;
   bookTitle: string;
   childChunkTokenSize?: number;
   childTokenOverlap?: number;

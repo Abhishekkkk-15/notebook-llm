@@ -13,6 +13,7 @@ export function chunkFormattedBook(
   const childChunkTokenSize = config?.childChunkTokenSize ?? 200;
   const childTokenOverlap = config?.childTokenOverlap ?? 40;
   const bookTitle = config?.bookTitle || book.bookTitle;
+  const projectId = config?.projectId;
 
   const parents: IParentChunk[] = [];
   const children: IChildChunk[] = [];
@@ -21,7 +22,9 @@ export function chunkFormattedBook(
     const parentBody = section.content.trim();
     if (!parentBody) return;
 
-    const parentId = `p_sec_${index + 1}_p${section.pageStart}`;
+    const parentId = projectId
+      ? `p_${projectId}_sec_${index + 1}_p${section.pageStart}`
+      : `p_sec_${index + 1}_p${section.pageStart}`;
     const breadcrumb = section.breadcrumb;
 
     const sectionImages = (section.images || []).map((img) => ({
@@ -47,6 +50,7 @@ export function chunkFormattedBook(
       text: `## ${section.title}\n\n${parentBody}`,
       tokenCount: estimateTokens(parentBody),
       metadata: {
+        projectId,
         bookTitle,
         chapterNumber: index + 1,
         chapterTitle: section.parentTitle || section.title,
@@ -89,6 +93,7 @@ export function chunkFormattedBook(
         text: enrichedChildText,
         tokenCount: estimateTokens(enrichedChildText),
         metadata: {
+          projectId,
           bookTitle,
           chapterNumber: index + 1,
           chapterTitle: section.parentTitle || section.title,

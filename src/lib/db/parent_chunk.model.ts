@@ -15,6 +15,7 @@ export interface IParentChunkDoc extends Document {
 
 const MetadataSchema = new Schema<TMetadata>(
   {
+    projectId: { type: String },
     bookTitle: { type: String, required: true, index: true },
     chapterNumber: { type: Number, required: true },
     chapterTitle: { type: String, required: true },
@@ -56,7 +57,12 @@ const ParentChunkSchema = new Schema<IParentChunkDoc>(
   },
 );
 
-// Compound index for querying sections of a specific book efficiently
+// Indexes for querying sections of a specific project and book efficiently
+ParentChunkSchema.index({ "metadata.projectId": 1 });
+ParentChunkSchema.index({
+  "metadata.projectId": 1,
+  "metadata.bookTitle": 1,
+});
 ParentChunkSchema.index({
   "metadata.bookTitle": 1,
   "metadata.chapterNumber": 1,

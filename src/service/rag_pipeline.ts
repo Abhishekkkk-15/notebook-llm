@@ -1,23 +1,32 @@
+import fs from "fs";
+import path from "path";
+import crypto from "crypto";
 import type { ChatCompletionMessageParam } from "openai/resources";
 
 import { chunkFormattedBook } from "../lib/chunker.js";
 import { readAndFormatPdf } from "../lib/pdfFormatter.js";
 import { mongoParentStore } from "../lib/db/mongo_store.js";
+import { mongoProjectStore } from "../lib/db/project_store.js";
 import type { IParentChunkDoc } from "../lib/db/parent_chunk.model.js";
+import type { IProjectDoc } from "../lib/db/project.model.js";
 import { PinconeStore } from "../lib/db/pc_store.js";
 import { build_system_prompt, flat_chunks, llm } from "../lib/llm/embedding.js";
 import { MemoryRegistory } from "../lib/llm/memory_registory.js";
 
-interface IIngestOption {
+export interface IIngestOption {
+  projectId?: string;
+  projectName?: string;
   filePath: string;
-  bookTitle: string;
+  bookTitle?: string;
   namespace?: string;
   childTokenSize?: number;
   childOverlap?: number;
+  onProgress?: (status: string) => void;
 }
 
-interface IQueryOption {
+export interface IQueryOption {
   query: string;
+  projectId?: string;
   namespace?: string;
   bookTitle?: string;
   filters?: Record<string, any>;
@@ -26,11 +35,14 @@ interface IQueryOption {
 
 export interface IQueryResponse {
   answer?: string;
+  projectId?: string;
   sources: Array<{
     id: string;
     score: number;
     breadcrumb?: string;
     text?: string;
+    images?: any[];
+    imageUrls?: string[];
   }>;
 }
 
@@ -38,70 +50,179 @@ export class RAGPipeline {
   constructor(
     private pcStore = new PinconeStore(),
     private parentStore = mongoParentStore,
+    private projectStore = mongoProjectStore,
     private llmClient = llm,
   ) {}
+
+  /**
+   * Generates a unique, URL-safe project ID from a name or filename.
+   */
+  public generateProjectId(name: string): string {
+    const slug = name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 24);
+    const rand = crypto.randomBytes(3).toString("hex");
+    return `proj_${slug || "doc"}_${rand}`;
+  }
+
+  async listProjects(): Promise<IProjectDoc[]> {
+    return await this.projectStore.listProjects();
+  }
+
+  async getProject(projectId: string): Promise<IProjectDoc | null> {
+    return await this.projectStore.getProject(projectId);
+  }
+
+  async deleteProject(
+    projectId: string,
+    namespace?: string,
+  ): Promise<boolean> {
+    await Promise.all([
+      this.parentStore.deleteParentsByProject(projectId),
+      this.pcStore.deleteByProjectId(projectId, namespace),
+      this.projectStore.deleteProject(projectId),
+    ]);
+    return true;
+  }
 
   async ingestDocument(option: IIngestOption) {
     const namespace = option.namespace ?? "child_chunks";
     const childTokenSize = option.childTokenSize ?? 350;
     const childOverlap = option.childOverlap ?? 60;
 
-    let formatted = await readAndFormatPdf(option.filePath, {
-      bookTitle: option.bookTitle,
-    });
-
-    const { parents, children } = chunkFormattedBook(formatted, {
-      childChunkTokenSize: childTokenSize,
-      childTokenOverlap: childOverlap,
-    });
-
-    let child_with_vec = [];
-
-    for (let c of children) {
-      let vector = await this.llmClient.generate_embedding(
-        c.text,
-        "NVIDIA",
-        "passage",
-      );
-
-      if (!vector) {
-        throw new Error(`Failed to generate embedding for child chunk ${c.id}`);
-      }
-
-      child_with_vec.push({
-        chunk: c,
-        vector,
-      });
+    const resolvedPath = path.resolve(process.cwd(), option.filePath);
+    if (!fs.existsSync(resolvedPath)) {
+      throw new Error(`File not found: ${resolvedPath}`);
     }
 
-    console.log(
-      `Embedding generation completed for ${child_with_vec.length} child chunks.`,
-    );
+    const fileName = path.basename(resolvedPath);
+    const bookTitle =
+      option.bookTitle ||
+      option.projectName ||
+      path.basename(resolvedPath, path.extname(resolvedPath));
+    const projectName = option.projectName || bookTitle;
+    const projectId =
+      option.projectId || this.generateProjectId(projectName || fileName);
+    const fileStats = fs.statSync(resolvedPath);
 
-    await this.parentStore.upsertParents(parents);
+    option.onProgress?.(`Registering project: ${projectName} (${projectId})...`);
 
-    await this.pcStore.upsertChunks(child_with_vec, {
-      namespace,
+    // 1. Initialize project in MongoDB
+    await this.projectStore.createOrUpdateProject({
+      projectId,
+      name: projectName,
+      fileName,
+      filePath: resolvedPath,
+      fileSizeBytes: fileStats.size,
+      status: "ingesting",
     });
 
-    return {
-      bookTitle: formatted.bookTitle,
-      totalPages: formatted.totalPages,
-      sectionsCount: formatted.sections.length,
-      parentCount: parents.length,
-      childCount: children.length,
-    };
+    try {
+      option.onProgress?.("Parsing PDF, extracting images & Mermaid diagrams...");
+      const formatted = await readAndFormatPdf(resolvedPath, {
+        bookTitle,
+      });
+
+      option.onProgress?.(
+        `Parsed ${formatted.totalPages} pages. Slicing into hierarchical parent/child chunks...`,
+      );
+
+      const { parents, children } = chunkFormattedBook(formatted, {
+        projectId,
+        bookTitle,
+        childChunkTokenSize: childTokenSize,
+        childTokenOverlap: childOverlap,
+      });
+
+      const totalImages = formatted.images?.length ?? 0;
+      const totalDiagrams = parents.filter((p) => p.metadata.hasDiagrams).length;
+
+      option.onProgress?.(
+        `Generating embeddings for ${children.length} child chunks...`,
+      );
+
+      const child_with_vec = [];
+      for (let i = 0; i < children.length; i++) {
+        const c = children[i]!;
+        const vector = await this.llmClient.generate_embedding(
+          c.text,
+          "NVIDIA",
+          "passage",
+        );
+
+        if (!vector) {
+          throw new Error(`Failed to generate embedding for child chunk ${c.id}`);
+        }
+
+        child_with_vec.push({ chunk: c, vector });
+
+        if ((i + 1) % 50 === 0 || i === children.length - 1) {
+          option.onProgress?.(
+            `Embedding generation: ${i + 1} / ${children.length} chunks done.`,
+          );
+        }
+      }
+
+      option.onProgress?.("Saving parent sections to MongoDB...");
+      await this.parentStore.upsertParents(parents);
+
+      option.onProgress?.("Upserting vectors to Pinecone...");
+      await this.pcStore.upsertChunks(child_with_vec, { namespace });
+
+      // 2. Mark project as ready in MongoDB
+      const updatedProject = await this.projectStore.createOrUpdateProject({
+        projectId,
+        name: projectName,
+        fileName,
+        filePath: resolvedPath,
+        fileSizeBytes: fileStats.size,
+        totalPages: formatted.totalPages,
+        totalSections: formatted.sections.length,
+        totalParents: parents.length,
+        totalChildren: children.length,
+        totalImages,
+        totalDiagrams,
+        status: "ready",
+      });
+
+      option.onProgress?.("Ingestion completed successfully!");
+
+      return {
+        project: updatedProject,
+        projectId,
+        bookTitle: formatted.bookTitle,
+        totalPages: formatted.totalPages,
+        sectionsCount: formatted.sections.length,
+        parentCount: parents.length,
+        childCount: children.length,
+        totalImages,
+        totalDiagrams,
+      };
+    } catch (err: any) {
+      await this.projectStore.createOrUpdateProject({
+        projectId,
+        name: projectName,
+        status: "error",
+        error: err?.message || String(err),
+      });
+      throw err;
+    }
   }
 
-  async query(option: IQueryOption) {
+  async query(option: IQueryOption): Promise<IQueryResponse> {
     const namespace = option.namespace ?? "child_chunks";
 
-    let full_content = await this.hybrid_search({ ...option, namespace });
+    const full_content = await this.hybrid_search({ ...option, namespace });
 
     if (!full_content || full_content.length === 0) {
+      const scopeMsg = option.projectId
+        ? ` in project '${option.projectId}'`
+        : "";
       return {
-        answer:
-          "No relevant documents found matching your query. Please make sure the book has been ingested via /ingest.",
+        answer: `No relevant documents found matching your query${scopeMsg}. Please check that the PDF is ingested.`,
+        projectId: option.projectId,
         sources: [],
       };
     }
@@ -117,23 +238,25 @@ export class RAGPipeline {
 
     return {
       answer: res?.content ?? undefined,
+      projectId: option.projectId,
       sources: full_content.map((c) => ({
         id: String(c.chunkId || c._id),
         score: (c as any).rrfScore || 0,
         breadcrumb: c.metadata.breadcrumb,
         text: c.text,
+        images: c.metadata.images || [],
+        imageUrls: c.metadata.imageUrls || [],
       })),
     };
   }
 
-  // Hybrid Search: Pinecone Vector + MongoDB Text Search merged via RRF
+  // Hybrid Search: Pinecone Vector + MongoDB Text Search merged via RRF (strictly filtered by projectId)
   async hybrid_search(option: IQueryOption): Promise<IParentChunkDoc[]> {
     const namespace = option.namespace ?? "child_chunks";
     const topK = option.topK ?? 5;
-    // Retrieve a wider candidate pool from both systems so RRF has enough candidates to fuse
     const candidateLimit = Math.max(topK * 3, 15);
 
-    let userQueryEmbd = await this.llmClient.generate_embedding(
+    const userQueryEmbd = await this.llmClient.generate_embedding(
       option.query,
       "NVIDIA",
       "query",
@@ -146,13 +269,10 @@ export class RAGPipeline {
     let keywords: string[] = [];
     try {
       keywords = await this.llmClient.get_keyword(option.query);
-    } catch (err) {
-      console.warn(
-        "[Hybrid Search] LLM keyword extraction failed, falling back to query terms.",
-      );
+    } catch {
+      // Fallback
     }
 
-    // If LLM returned no keywords, extract meaningful words from query
     if (!keywords || keywords.length === 0) {
       keywords = option.query
         .split(/\s+/)
@@ -160,20 +280,29 @@ export class RAGPipeline {
         .filter((w) => w.length > 2);
     }
 
+    // Set up project isolation filters
+    const mongoFilter: Record<string, any> = {};
+    const pcFilter: Record<string, any> = { ...(option.filters || {}) };
+
+    if (option.projectId) {
+      mongoFilter["metadata.projectId"] = option.projectId;
+      pcFilter["projectId"] = { $eq: option.projectId };
+    }
+
     // 1. Fetch wider candidate pools in parallel
     const [keyword_hits, vector_hits] = await Promise.all([
-      this.parentStore.searchKeywordsAnd(keywords, candidateLimit),
+      this.parentStore.searchKeywordsAnd(keywords, candidateLimit, mongoFilter),
       this.pcStore.search(userQueryEmbd, {
         topK: candidateLimit,
         namespace,
-        filter: option.filters,
+        filter: Object.keys(pcFilter).length > 0 ? pcFilter : undefined,
       }),
     ]);
 
     const k = 60;
     const score_map = new Map<string, number>();
 
-    // 2. Process Vector Hits: Deduplicate per parent to take its best rank (prevents double-counting child chunks)
+    // 2. Process Vector Hits: Deduplicate per parent to take its best rank
     const seenVectorParents = new Set<string>();
     vector_hits.forEach((hit, rank) => {
       const parentId = hit.metadata?.parentId;
