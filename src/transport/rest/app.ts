@@ -19,6 +19,14 @@ export function createRestApp(ragPipeline: RAGPipeline): Express {
   // Allows web UI or client to view images directly via http://localhost:PORT/assets/images/...
   const imagesDir = path.resolve(process.cwd(), "extracted_images");
   app.use("/assets/images", express.static(imagesDir));
+  app.use("/extracted_images", express.static(imagesDir));
+
+  // Serve Public Web UI (White + Beige Shadcn Theme)
+  const publicDir = path.resolve(process.cwd(), "public");
+  app.use(express.static(publicDir));
+  app.get("/", (req: Request, res: Response) => {
+    res.sendFile(path.join(publicDir, "index.html"));
+  });
 
   // API Routes
   app.use("/api/health", createHealthRouter());

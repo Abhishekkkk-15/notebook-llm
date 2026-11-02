@@ -1,0 +1,1274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Notebook-LLM • Multimodal Technical Book RAG</title>
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'system-ui', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          },
+          colors: {
+            stone: {
+              25: '#FCFCFA',
+              50: '#F9F8F5',
+              100: '#F4F2EC',
+              150: '#ECE9E0',
+              200: '#E4DFD5',
+              300: '#D5CEC1',
+              400: '#A8A092',
+              500: '#7B7365',
+              600: '#5A5348',
+              700: '#403B33',
+              800: '#2A2621',
+              900: '#1A1815',
+            },
+            beige: {
+              50: '#FAF8F5',
+              100: '#F5EFE6',
+              200: '#EDE0D0',
+              300: '#DEC9B0',
+              400: '#CBB08F',
+              500: '#B5946E',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- External Helpers -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    /* Warm Minimal Scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #E4DFD5;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #D5CEC1;
+    }
+
+    /* Markdown Styling in Responses */
+    .prose-custom p {
+      margin-bottom: 0.85em;
+      line-height: 1.68;
+      color: #2A2621;
+    }
+    .prose-custom h1, .prose-custom h2, .prose-custom h3 {
+      font-weight: 700;
+      color: #1A1815;
+      margin-top: 1.25em;
+      margin-bottom: 0.5em;
+    }
+    .prose-custom ul {
+      list-style-type: disc;
+      padding-left: 1.25em;
+      margin-bottom: 0.85em;
+    }
+    .prose-custom ol {
+      list-style-type: decimal;
+      padding-left: 1.25em;
+      margin-bottom: 0.85em;
+    }
+    .prose-custom li {
+      margin-bottom: 0.35em;
+      line-height: 1.6;
+    }
+    .prose-custom pre {
+      background: #1A1815;
+      color: #F4F2EC;
+      border-radius: 0.65rem;
+      padding: 0.85rem 1rem;
+      overflow-x: auto;
+      margin: 1rem 0;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.85rem;
+    }
+    .prose-custom code:not(pre code) {
+      background: #ECE9E0;
+      color: #773809;
+      padding: 0.15rem 0.35rem;
+      border-radius: 0.3rem;
+      font-size: 0.86em;
+      font-family: "JetBrains Mono", monospace;
+    }
+    .prose-custom blockquote {
+      border-left: 3px solid #D5CEC1;
+      padding-left: 0.85rem;
+      color: #5A5348;
+      font-style: italic;
+      margin: 0.75rem 0;
+    }
+    .prose-custom table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+      font-size: 0.88rem;
+    }
+    .prose-custom th, .prose-custom td {
+      border: 1px solid #E4DFD5;
+      padding: 0.5rem 0.75rem;
+      text-align: left;
+    }
+    .prose-custom th {
+      background: #F4F2EC;
+      font-weight: 600;
+      color: #1A1815;
+    }
+
+    /* Mermaid Container */
+    .mermaid-box {
+      background: #FFFFFF;
+      border: 1px solid #E4DFD5;
+      border-radius: 0.75rem;
+      padding: 1.25rem;
+      margin: 1rem 0;
+      overflow-x: auto;
+      display: flex;
+      justify-content: center;
+    }
+  </style>
+</head>
+<body class="bg-stone-50 text-stone-900 min-h-screen flex flex-col font-sans antialiased selection:bg-beige-200 selection:text-stone-900">
+
+  <!-- ========================================================================= -->
+  <!-- TOP NAVBAR                                                                -->
+  <!-- ========================================================================= -->
+  <header class="sticky top-0 z-40 bg-stone-25/90 backdrop-blur-md border-b border-stone-200/80 transition-all">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      
+      <!-- Logo & Brand -->
+      <div class="flex items-center space-x-3">
+        <div class="w-9 h-9 rounded-xl bg-stone-900 flex items-center justify-center text-white shadow-sm shadow-stone-900/10">
+          <i data-lucide="book-open" class="w-5 h-5"></i>
+        </div>
+        <div>
+          <div class="flex items-center space-x-2">
+            <span class="font-bold text-base tracking-tight text-stone-900">Notebook-LLM</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-beige-100 text-stone-700 border border-beige-200">
+              Multimodal RAG
+            </span>
+          </div>
+          <p class="text-[11px] text-stone-500 font-medium">Graph-RAG • Parent-Child Chunks • Visual AI</p>
+        </div>
+      </div>
+
+      <!-- Right Header Actions (Project Selector + Health Badge) -->
+      <div class="flex items-center space-x-3">
+        
+        <!-- Project Selector Dropdown -->
+        <div class="relative">
+          <select id="project-selector" class="appearance-none bg-white border border-stone-200 rounded-lg pl-3 pr-8 py-1.5 text-xs font-medium text-stone-800 shadow-sm hover:border-stone-300 focus:outline-none focus:ring-2 focus:ring-stone-400/20 cursor-pointer max-w-[240px] truncate">
+            <option value="" disabled selected>Loading projects...</option>
+          </select>
+          <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-stone-400">
+            <i data-lucide="chevrons-up-down" class="w-3.5 h-3.5"></i>
+          </div>
+        </div>
+
+        <!-- Health Status Dot -->
+        <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-white border border-stone-200/70 text-xs text-stone-600 shadow-xs">
+          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span class="font-medium text-[11px]" id="health-indicator">API Online</span>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Active Project Stats Bar -->
+    <div id="project-stats-bar" class="bg-stone-100/70 border-t border-stone-200/60 px-4 py-1.5 text-xs text-stone-600 hidden">
+      <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
+        <div class="flex items-center space-x-2">
+          <i data-lucide="file-text" class="w-3.5 h-3.5 text-stone-400"></i>
+          <span class="font-semibold text-stone-800 truncate max-w-sm" id="stats-book-title">-</span>
+        </div>
+        <div class="flex items-center space-x-4 text-[11px] font-medium text-stone-600">
+          <span id="stats-pages">0 pages</span>
+          <span>•</span>
+          <span id="stats-chunks">0 vectors</span>
+          <span>•</span>
+          <span id="stats-sections">0 sections</span>
+          <span>•</span>
+          <span id="stats-visuals" class="text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200/60">0 visuals</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ========================================================================= -->
+  <!-- TAB NAVIGATION (Shadcn Segmented Bar)                                      -->
+  <!-- ========================================================================= -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full flex flex-col">
+    
+    <div class="flex items-center justify-between border-b border-stone-200 pb-3 mb-6">
+      <div class="inline-flex p-1 bg-stone-150/70 rounded-xl border border-stone-200/80 shadow-xs" id="nav-tabs">
+        <button onclick="switchTab('qa')" id="tab-btn-qa" class="tab-btn active px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition-all bg-white text-stone-900 shadow-xs">
+          <i data-lucide="message-square" class="w-3.5 h-3.5"></i>
+          <span>Ask Q&A</span>
+        </button>
+        <button onclick="switchTab('search')" id="tab-btn-search" class="tab-btn px-3.5 py-1.5 rounded-lg text-xs font-medium text-stone-600 hover:text-stone-900 transition-all flex items-center space-x-1.5">
+          <i data-lucide="search" class="w-3.5 h-3.5"></i>
+          <span>Semantic Search</span>
+        </button>
+        <button onclick="switchTab('toc')" id="tab-btn-toc" class="tab-btn px-3.5 py-1.5 rounded-lg text-xs font-medium text-stone-600 hover:text-stone-900 transition-all flex items-center space-x-1.5">
+          <i data-lucide="list-tree" class="w-3.5 h-3.5"></i>
+          <span>Table of Contents</span>
+        </button>
+        <button onclick="switchTab('gallery')" id="tab-btn-gallery" class="tab-btn px-3.5 py-1.5 rounded-lg text-xs font-medium text-stone-600 hover:text-stone-900 transition-all flex items-center space-x-1.5">
+          <i data-lucide="image" class="w-3.5 h-3.5"></i>
+          <span>Visual Gallery</span>
+        </button>
+        <button onclick="switchTab('ingest')" id="tab-btn-ingest" class="tab-btn px-3.5 py-1.5 rounded-lg text-xs font-medium text-stone-600 hover:text-stone-900 transition-all flex items-center space-x-1.5">
+          <i data-lucide="upload-cloud" class="w-3.5 h-3.5"></i>
+          <span>Ingest PDF</span>
+        </button>
+      </div>
+
+      <!-- Quick Action Buttons -->
+      <div class="flex items-center space-x-2">
+        <button onclick="clearChat()" id="clear-chat-btn" class="px-2.5 py-1.5 text-xs text-stone-600 hover:text-stone-900 bg-white hover:bg-stone-100 rounded-lg border border-stone-200 transition-colors flex items-center space-x-1" title="Clear Chat History">
+          <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+          <span>Clear Chat</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ======================================================================= -->
+    <!-- TAB 1: ASK Q&A (Chat Interface)                                         -->
+    <!-- ======================================================================= -->
+    <div id="view-qa" class="tab-content flex-1 flex flex-col min-h-[620px]">
+      
+      <!-- Chat Messages Container -->
+      <div id="chat-messages" class="flex-1 overflow-y-auto space-y-6 pb-6 pr-2 max-h-[65vh]">
+        <!-- Welcome Banner if empty -->
+        <div id="qa-welcome" class="bg-white rounded-2xl border border-stone-200 p-8 text-center max-w-2xl mx-auto my-8 shadow-xs">
+          <div class="w-12 h-12 rounded-2xl bg-beige-100 border border-beige-200 flex items-center justify-center mx-auto mb-4 text-stone-800">
+            <i data-lucide="sparkles" class="w-6 h-6"></i>
+          </div>
+          <h2 class="text-lg font-bold text-stone-900 mb-1">Ask questions scoped to your active book</h2>
+          <p class="text-xs text-stone-500 mb-6 leading-relaxed">
+            Notebook-LLM uses hybrid vector and text search to retrieve complete parent chunks, synthesizing answers with exact chapter citations and diagram figures.
+          </p>
+
+          <!-- Sample Prompts -->
+          <div class="text-left">
+            <span class="text-[11px] font-semibold text-stone-400 uppercase tracking-wider mb-2 block">Try asking:</span>
+            <div class="grid grid-cols-1 gap-2">
+              <button onclick="askPreset('What are the core design patterns and architecture of AI agents?')" class="text-left text-xs bg-stone-50 hover:bg-beige-100/70 border border-stone-200/80 rounded-xl px-4 py-2.5 text-stone-800 transition-all flex items-center justify-between group">
+                <span>"What are the core design patterns and architecture of AI agents?"</span>
+                <i data-lucide="arrow-right" class="w-3.5 h-3.5 text-stone-400 group-hover:translate-x-0.5 transition-transform"></i>
+              </button>
+              <button onclick="askPreset('Explain the ReAct execution loop and the Think-Act-Observe iteration.')" class="text-left text-xs bg-stone-50 hover:bg-beige-100/70 border border-stone-200/80 rounded-xl px-4 py-2.5 text-stone-800 transition-all flex items-center justify-between group">
+                <span>"Explain the ReAct execution loop and the Think-Act-Observe iteration."</span>
+                <i data-lucide="arrow-right" class="w-3.5 h-3.5 text-stone-400 group-hover:translate-x-0.5 transition-transform"></i>
+              </button>
+              <button onclick="askPreset('What is the difference between workflow nodes and autonomous agent nodes?')" class="text-left text-xs bg-stone-50 hover:bg-beige-100/70 border border-stone-200/80 rounded-xl px-4 py-2.5 text-stone-800 transition-all flex items-center justify-between group">
+                <span>"What is the difference between workflow nodes and autonomous agent nodes?"</span>
+                <i data-lucide="arrow-right" class="w-3.5 h-3.5 text-stone-400 group-hover:translate-x-0.5 transition-transform"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat Input Box -->
+      <div class="mt-auto pt-4 bg-stone-50">
+        <form onsubmit="handleSendQuestion(event)" class="relative bg-white border border-stone-200 rounded-2xl shadow-xs focus-within:ring-2 focus-within:ring-stone-400/20 focus-within:border-stone-400 transition-all p-2 flex flex-col">
+          <textarea 
+            id="qa-input"
+            rows="2"
+            placeholder="Ask anything about the book... (Press Enter to submit, Shift+Enter for newline)"
+            class="w-full resize-none bg-transparent px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:outline-none"
+            onkeydown="handleTextareaKeyDown(event)"
+          ></textarea>
+          
+          <div class="flex items-center justify-between pt-2 border-t border-stone-100 px-2">
+            <div class="flex items-center space-x-2 text-[11px] text-stone-400">
+              <i data-lucide="cpu" class="w-3.5 h-3.5"></i>
+              <span>Hybrid RRF Retrieval (Pinecone + MongoDB)</span>
+            </div>
+            
+            <button 
+              type="submit" 
+              id="qa-submit-btn"
+              class="px-4 py-1.5 rounded-lg bg-stone-900 hover:bg-stone-800 text-white text-xs font-semibold shadow-xs flex items-center space-x-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+              <span>Send</span>
+              <i data-lucide="send" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+        </form>
+      </div>
+
+    </div>
+
+    <!-- ======================================================================= -->
+    <!-- TAB 2: HYBRID SEARCH                                                    -->
+    <!-- ======================================================================= -->
+    <div id="view-search" class="tab-content hidden flex-1 flex flex-col">
+      <div class="bg-white rounded-2xl border border-stone-200 p-6 mb-6 shadow-xs">
+        <h3 class="text-sm font-bold text-stone-900 mb-1">Semantic & Vector Hybrid Search</h3>
+        <p class="text-xs text-stone-500 mb-4">Combines dense embeddings and keyword full-text search merged using Reciprocal Rank Fusion (RRF).</p>
+        
+        <form onsubmit="handleExecuteSearch(event)" class="flex flex-col sm:flex-row gap-3">
+          <div class="relative flex-1">
+            <i data-lucide="search" class="w-4 h-4 absolute left-3 top-3 text-stone-400"></i>
+            <input 
+              type="text" 
+              id="search-input"
+              placeholder="e.g. Memory reflection, ReAct, tool safety, orchestrator patterns..."
+              class="w-full bg-stone-50 border border-stone-200 rounded-xl pl-9 pr-4 py-2 text-sm text-stone-900 placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-400/20 focus:border-stone-400"
+            />
+          </div>
+          
+          <div class="flex items-center space-x-2">
+            <label class="text-xs text-stone-500 font-medium whitespace-nowrap">Top-K:</label>
+            <select id="search-topk" class="bg-stone-50 border border-stone-200 rounded-xl px-2.5 py-2 text-xs font-medium text-stone-800">
+              <option value="3">3 Chunks</option>
+              <option value="5" selected>5 Chunks</option>
+              <option value="10">10 Chunks</option>
+            </select>
+            
+            <button type="submit" class="px-5 py-2 bg-stone-900 hover:bg-stone-800 text-white text-xs font-semibold rounded-xl shadow-xs transition-colors flex items-center space-x-1.5">
+              <span>Search</span>
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Search Results Area -->
+      <div id="search-results" class="space-y-4">
+        <div class="text-center py-12 text-stone-400 text-xs">
+          Enter a search query to inspect matching parent chunks and RRF scores.
+        </div>
+      </div>
+    </div>
+
+    <!-- ======================================================================= -->
+    <!-- TAB 3: TABLE OF CONTENTS & SECTION READER                               -->
+    <!-- ======================================================================= -->
+    <div id="view-toc" class="tab-content hidden flex-1 flex flex-col md:flex-row gap-6">
+      
+      <!-- Left Column: Table of Contents Outline -->
+      <div class="w-full md:w-80 bg-white rounded-2xl border border-stone-200 p-4 shadow-xs flex flex-col max-h-[75vh]">
+        <div class="flex items-center justify-between pb-3 border-b border-stone-200 mb-2">
+          <h3 class="text-xs font-bold uppercase tracking-wider text-stone-500">Book Outline</h3>
+          <span class="text-xs bg-stone-100 text-stone-600 px-2 py-0.5 rounded-full" id="toc-count">0 sections</span>
+        </div>
+        
+        <div class="relative mb-3">
+          <i data-lucide="filter" class="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-stone-400"></i>
+          <input 
+            type="text" 
+            id="toc-filter-input"
+            oninput="filterTocItems(this.value)"
+            placeholder="Filter sections..."
+            class="w-full bg-stone-50 border border-stone-200 rounded-lg pl-8 pr-3 py-1.5 text-xs text-stone-800 focus:outline-none focus:ring-1 focus:ring-stone-400"
+          />
+        </div>
+
+        <div id="toc-list" class="flex-1 overflow-y-auto space-y-1 pr-1">
+          <div class="text-center py-8 text-xs text-stone-400">Loading Table of Contents...</div>
+        </div>
+      </div>
+
+      <!-- Right Column: Full Section Reader Pane -->
+      <div class="flex-1 bg-white rounded-2xl border border-stone-200 p-6 shadow-xs flex flex-col min-h-[500px] max-h-[75vh] overflow-y-auto">
+        <div id="reader-pane-header" class="border-b border-stone-100 pb-4 mb-4">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-semibold text-amber-800 bg-beige-100 px-2.5 py-0.5 rounded-full border border-beige-200" id="reader-chapter">Select a section</span>
+            <div class="flex items-center space-x-2">
+              <button onclick="navigateSection(-1)" class="p-1.5 bg-stone-50 hover:bg-stone-100 rounded-lg border border-stone-200 text-stone-600" title="Previous Section">
+                <i data-lucide="chevron-left" class="w-4 h-4"></i>
+              </button>
+              <button onclick="navigateSection(1)" class="p-1.5 bg-stone-50 hover:bg-stone-100 rounded-lg border border-stone-200 text-stone-600" title="Next Section">
+                <i data-lucide="chevron-right" class="w-4 h-4"></i>
+              </button>
+            </div>
+          </div>
+          <h2 class="text-lg font-bold text-stone-900 mt-2" id="reader-title">No Section Selected</h2>
+          <p class="text-xs text-stone-400 mt-0.5" id="reader-breadcrumb">Select a chapter from the left to read full text, diagrams, and figures.</p>
+        </div>
+
+        <div id="reader-body" class="prose-custom flex-1 text-sm text-stone-800">
+          <div class="text-center py-16 text-stone-400 text-xs">
+            Choose a section from the Table of Contents outline to read.
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ======================================================================= -->
+    <!-- TAB 4: VISUAL & DIAGRAM GALLERY                                         -->
+    <!-- ======================================================================= -->
+    <div id="view-gallery" class="tab-content hidden flex-1 flex flex-col">
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+        <div>
+          <h3 class="text-base font-bold text-stone-900">Extracted Visuals & Diagram Gallery</h3>
+          <p class="text-xs text-stone-500">Every screenshot, chart, and Mermaid process flowchart extracted from the PDF.</p>
+        </div>
+
+        <!-- Filter Buttons -->
+        <div class="inline-flex p-1 bg-white border border-stone-200 rounded-xl shadow-xs text-xs">
+          <button onclick="filterGallery('ALL')" id="gal-filter-ALL" class="gal-filter-btn px-3 py-1 rounded-lg font-semibold bg-stone-900 text-white">All (<span id="gal-count-all">0</span>)</button>
+          <button onclick="filterGallery('IMAGE')" id="gal-filter-IMAGE" class="gal-filter-btn px-3 py-1 rounded-lg text-stone-600 hover:text-stone-900">Figures (<span id="gal-count-img">0</span>)</button>
+          <button onclick="filterGallery('MERMAID')" id="gal-filter-MERMAID" class="gal-filter-btn px-3 py-1 rounded-lg text-stone-600 hover:text-stone-900">Flowcharts (<span id="gal-count-diag">0</span>)</button>
+        </div>
+      </div>
+
+      <!-- Gallery Grid -->
+      <div id="gallery-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div class="col-span-full text-center py-12 text-stone-400 text-xs">Loading visual assets...</div>
+      </div>
+    </div>
+
+    <!-- ======================================================================= -->
+    <!-- TAB 5: INGEST NEW PDF                                                   -->
+    <!-- ======================================================================= -->
+    <div id="view-ingest" class="tab-content hidden flex-1 flex flex-col max-w-2xl mx-auto w-full">
+      <div class="bg-white rounded-2xl border border-stone-200 p-8 shadow-xs">
+        <div class="w-12 h-12 rounded-2xl bg-beige-100 border border-beige-200 flex items-center justify-center mb-4 text-stone-900">
+          <i data-lucide="file-up" class="w-6 h-6"></i>
+        </div>
+        <h3 class="text-base font-bold text-stone-900 mb-1">Ingest a New Technical PDF Book</h3>
+        <p class="text-xs text-stone-500 mb-6">Upload any technical PDF to extract full text, tables, embedded figures, and convert vector flows into Mermaid diagrams.</p>
+
+        <form id="ingest-form" onsubmit="handleIngestPdf(event)" class="space-y-4">
+          
+          <!-- Dropzone -->
+          <div 
+            id="dropzone"
+            onclick="document.getElementById('file-input').click()"
+            ondragover="handleDragOver(event)"
+            ondragleave="handleDragLeave(event)"
+            ondrop="handleDrop(event)"
+            class="border-2 border-dashed border-stone-300 hover:border-stone-400 rounded-2xl p-8 text-center cursor-pointer bg-stone-50/50 hover:bg-stone-50 transition-colors"
+          >
+            <i data-lucide="cloud-upload" class="w-8 h-8 text-stone-400 mx-auto mb-2"></i>
+            <span class="text-xs font-semibold text-stone-800 block" id="dropzone-label">Click to select PDF or drag & drop</span>
+            <span class="text-[11px] text-stone-400 block mt-1">Up to 150MB PDF books</span>
+            <input type="file" id="file-input" accept=".pdf" class="hidden" onchange="handleFileSelected(this.files)" />
+          </div>
+
+          <!-- Project Custom Name -->
+          <div>
+            <label class="block text-xs font-semibold text-stone-700 mb-1">Project Name (Optional)</label>
+            <input 
+              type="text" 
+              id="ingest-project-name"
+              placeholder="e.g. Designing Data-Intensive Applications"
+              class="w-full bg-white border border-stone-200 rounded-xl px-3.5 py-2 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-400/20"
+            />
+          </div>
+
+          <!-- Chunk Token Settings -->
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-semibold text-stone-700 mb-1">Child Chunk Tokens</label>
+              <input type="number" id="ingest-token-size" value="400" min="150" max="1000" class="w-full bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs text-stone-800" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-stone-700 mb-1">Child Chunk Overlap</label>
+              <input type="number" id="ingest-overlap" value="60" min="0" max="200" class="w-full bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs text-stone-800" />
+            </div>
+          </div>
+
+          <!-- Submit Button -->
+          <button 
+            type="submit" 
+            id="ingest-submit-btn"
+            class="w-full py-2.5 bg-stone-900 hover:bg-stone-800 text-white font-semibold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center space-x-2">
+            <i data-lucide="cpu" class="w-4 h-4"></i>
+            <span>Start Multi-Modal Ingestion</span>
+          </button>
+        </form>
+
+        <!-- Ingestion Live Progress Box (SSE stream) -->
+        <div id="ingest-progress-box" class="mt-6 border-t border-stone-200 pt-6 hidden">
+          <div class="flex items-center justify-between text-xs font-semibold text-stone-800 mb-2">
+            <span>Ingestion in Progress...</span>
+            <span id="ingest-pct" class="text-amber-800 font-mono">Running</span>
+          </div>
+          <div class="w-full bg-stone-200 rounded-full h-2 overflow-hidden mb-3">
+            <div id="ingest-progress-bar" class="bg-amber-600 h-2 rounded-full transition-all duration-300 w-1/4 animate-pulse"></div>
+          </div>
+          <div id="ingest-log" class="text-[11px] font-mono bg-stone-900 text-stone-200 p-3 rounded-xl max-h-36 overflow-y-auto space-y-1">
+            <div>[System] Connecting to ingestion stream...</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ========================================================================= -->
+  <!-- LIGHTBOX / FULL-SIZE IMAGE MODAL                                          -->
+  <!-- ========================================================================= -->
+  <div id="image-modal" class="fixed inset-0 z-50 bg-stone-950/80 backdrop-blur-sm hidden flex items-center justify-center p-4" onclick="closeImageModal()">
+    <div class="relative bg-white rounded-2xl max-w-4xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl" onclick="event.stopPropagation()">
+      <div class="px-5 py-3 border-b border-stone-200 flex items-center justify-between bg-stone-50">
+        <div>
+          <h4 id="modal-title" class="text-xs font-bold text-stone-900">Figure Preview</h4>
+          <span id="modal-subtitle" class="text-[11px] text-stone-500">Source: Technical Book Extraction</span>
+        </div>
+        <button onclick="closeImageModal()" class="p-1 rounded-lg text-stone-400 hover:text-stone-700 hover:bg-stone-200/60 transition-colors">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+      <div class="p-4 overflow-auto flex items-center justify-center bg-stone-100 max-h-[75vh]">
+        <img id="modal-img" src="" alt="Full preview" class="max-w-full max-h-[70vh] rounded-lg shadow-sm object-contain" />
+      </div>
+      <div class="px-5 py-3 border-t border-stone-200 bg-white flex justify-between items-center text-xs">
+        <a id="modal-download" href="" target="_blank" download class="inline-flex items-center space-x-1 text-stone-600 hover:text-stone-900 font-medium">
+          <i data-lucide="download" class="w-3.5 h-3.5"></i>
+          <span>Download High-Res</span>
+        </a>
+        <button onclick="closeImageModal()" class="px-3 py-1 bg-stone-900 text-white rounded-lg font-medium">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- APPLICATION JAVASCRIPT STATE & LOGIC                                      -->
+  <!-- ========================================================================= -->
+  <script>
+    // Initialize Mermaid diagram engine
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: 'neutral',
+      flowchart: { curve: 'basis', htmlLabels: true }
+    });
+
+    let currentProject = null;
+    let allProjects = [];
+    let currentSections = [];
+    let currentVisuals = [];
+    let currentSectionIndex = 0;
+    let selectedFileForIngest = null;
+
+    // Bootstrapping
+    document.addEventListener("DOMContentLoaded", async () => {
+      lucide.createIcons();
+      await checkHealth();
+      await loadProjects();
+    });
+
+    async function checkHealth() {
+      try {
+        const res = await fetch("/api/health");
+        const data = await res.json();
+        const indicator = document.getElementById("health-indicator");
+        if (data.status === "ok") {
+          indicator.textContent = `Online • Mongo: ${data.services.mongodb}`;
+        }
+      } catch (err) {
+        document.getElementById("health-indicator").textContent = "API Offline";
+      }
+    }
+
+    async function loadProjects() {
+      try {
+        const res = await fetch("/api/projects");
+        const json = await res.json();
+        allProjects = json.data || [];
+
+        const selector = document.getElementById("project-selector");
+        selector.innerHTML = "";
+
+        if (allProjects.length === 0) {
+          selector.innerHTML = `<option value="">No projects found (Ingest first)</option>`;
+          switchTab('ingest');
+          return;
+        }
+
+        allProjects.forEach((proj) => {
+          const opt = document.createElement("option");
+          opt.value = proj.projectId;
+          opt.textContent = `${proj.name} (${proj.totalPages} pgs)`;
+          selector.appendChild(opt);
+        });
+
+        selector.onchange = (e) => selectProject(e.target.value);
+        selectProject(allProjects[0].projectId);
+      } catch (err) {
+        console.error("Failed to load projects:", err);
+      }
+    }
+
+    async function selectProject(projectId) {
+      currentProject = allProjects.find((p) => p.projectId === projectId);
+      if (!currentProject) return;
+
+      document.getElementById("project-selector").value = projectId;
+
+      // Update Header Stats Bar
+      const statsBar = document.getElementById("project-stats-bar");
+      statsBar.classList.remove("hidden");
+      document.getElementById("stats-book-title").textContent = currentProject.name;
+      document.getElementById("stats-pages").textContent = `${currentProject.totalPages} pages`;
+      document.getElementById("stats-chunks").textContent = `${currentProject.totalChildren} vectors`;
+      document.getElementById("stats-sections").textContent = `${currentProject.totalParents} sections`;
+      document.getElementById("stats-visuals").textContent = `${currentProject.totalDiagrams + currentProject.totalImages} visuals`;
+
+      // Preload Table of Contents & Visuals
+      loadTableOfContents();
+      loadVisualGallery();
+    }
+
+    // Tab Navigation
+    function switchTab(tabId) {
+      document.querySelectorAll(".tab-content").forEach((el) => el.classList.add("hidden"));
+      document.querySelectorAll(".tab-btn").forEach((btn) => {
+        btn.classList.remove("active", "bg-white", "text-stone-900", "shadow-xs");
+        btn.classList.add("text-stone-600");
+      });
+
+      const activeView = document.getElementById(`view-${tabId}`);
+      const activeBtn = document.getElementById(`tab-btn-${tabId}`);
+
+      if (activeView) activeView.classList.remove("hidden");
+      if (activeBtn) {
+        activeBtn.classList.add("active", "bg-white", "text-stone-900", "shadow-xs");
+        activeBtn.classList.remove("text-stone-600");
+      }
+
+      lucide.createIcons();
+    }
+
+    // -------------------------------------------------------------------------
+    // TAB 1: Q&A CHAT LOGIC
+    // -------------------------------------------------------------------------
+    function askPreset(prompt) {
+      document.getElementById("qa-input").value = prompt;
+      handleSendQuestion(new Event("submit"));
+    }
+
+    function handleTextareaKeyDown(e) {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        handleSendQuestion(e);
+      }
+    }
+
+    function clearChat() {
+      const container = document.getElementById("chat-messages");
+      container.innerHTML = `
+        <div id="qa-welcome" class="bg-white rounded-2xl border border-stone-200 p-8 text-center max-w-2xl mx-auto my-8 shadow-xs">
+          <div class="w-12 h-12 rounded-2xl bg-beige-100 border border-beige-200 flex items-center justify-center mx-auto mb-4 text-stone-800">
+            <i data-lucide="sparkles" class="w-6 h-6"></i>
+          </div>
+          <h2 class="text-lg font-bold text-stone-900 mb-1">Ask questions scoped to your active book</h2>
+          <p class="text-xs text-stone-500 mb-6 leading-relaxed">
+            Notebook-LLM uses hybrid vector and text search to retrieve complete parent chunks, synthesizing answers with exact chapter citations and diagram figures.
+          </p>
+          <div class="text-left">
+            <span class="text-[11px] font-semibold text-stone-400 uppercase tracking-wider mb-2 block">Try asking:</span>
+            <div class="grid grid-cols-1 gap-2">
+              <button onclick="askPreset('What are the core design patterns and architecture of AI agents?')" class="text-left text-xs bg-stone-50 hover:bg-beige-100/70 border border-stone-200/80 rounded-xl px-4 py-2.5 text-stone-800 transition-all flex items-center justify-between group">
+                <span>\"What are the core design patterns and architecture of AI agents?\"</span>
+                <i data-lucide="arrow-right" class="w-3.5 h-3.5 text-stone-400 group-hover:translate-x-0.5 transition-transform"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+      lucide.createIcons();
+    }
+
+    async function handleSendQuestion(e) {
+      if (e) e.preventDefault();
+      const input = document.getElementById("qa-input");
+      const query = input.value.trim();
+      if (!query || !currentProject) return;
+
+      const welcome = document.getElementById("qa-welcome");
+      if (welcome) welcome.remove();
+
+      input.value = "";
+      appendUserMessage(query);
+
+      const assistantMsgId = `assistant-msg-${Date.now()}`;
+      appendLoadingMessage(assistantMsgId);
+
+      const submitBtn = document.getElementById("qa-submit-btn");
+      submitBtn.disabled = true;
+
+      try {
+        const res = await fetch("/api/rag/query", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query,
+            projectId: currentProject.projectId,
+            topK: 4,
+          }),
+        });
+
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || "Query failed");
+
+        updateAssistantMessage(assistantMsgId, data);
+      } catch (err) {
+        updateAssistantError(assistantMsgId, err.message);
+      } finally {
+        submitBtn.disabled = false;
+        lucide.createIcons();
+      }
+    }
+
+    function appendUserMessage(text) {
+      const chat = document.getElementById("chat-messages");
+      const msgDiv = document.createElement("div");
+      msgDiv.className = "flex justify-end";
+      msgDiv.innerHTML = `
+        <div class="max-w-xl bg-stone-900 text-white rounded-2xl rounded-tr-sm px-4 py-3 shadow-xs text-sm leading-relaxed">
+          ${escapeHtml(text)}
+        </div>
+      `;
+      chat.appendChild(msgDiv);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    function appendLoadingMessage(id) {
+      const chat = document.getElementById("chat-messages");
+      const msgDiv = document.createElement("div");
+      msgDiv.id = id;
+      msgDiv.className = "flex items-start space-x-3";
+      msgDiv.innerHTML = `
+        <div class="w-8 h-8 rounded-xl bg-beige-100 border border-beige-200 flex items-center justify-center text-stone-800 shrink-0">
+          <i data-lucide="bot" class="w-4 h-4"></i>
+        </div>
+        <div class="bg-white border border-stone-200 rounded-2xl rounded-tl-sm p-4 shadow-xs max-w-2xl text-xs text-stone-500 flex items-center space-x-2">
+          <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+          <span>Searching vectors, synthesizing parent chunks & figures...</span>
+        </div>
+      `;
+      chat.appendChild(msgDiv);
+      chat.scrollTop = chat.scrollHeight;
+      lucide.createIcons();
+    }
+
+    function updateAssistantMessage(id, data) {
+      const el = document.getElementById(id);
+      if (!el) return;
+
+      // Extract Mermaid diagrams from answer
+      let htmlAnswer = marked.parse(data.answer);
+
+      // Render Attached Image figures
+      let imagesHtml = "";
+      if (data.imageUrls && data.imageUrls.length > 0) {
+        imagesHtml = `
+          <div class="mt-4 pt-4 border-t border-stone-100">
+            <span class="text-[11px] font-semibold text-stone-500 uppercase tracking-wider block mb-2">Cited Visual Figures</span>
+            <div class="flex flex-wrap gap-2">
+              ${data.imageUrls.map((url, i) => `
+                <div class="relative group cursor-pointer" onclick="openImageModal('${url}', 'Cited Diagram ${i+1}')">
+                  <img src="/${url}" alt="Figure" class="h-20 w-32 object-cover rounded-lg border border-stone-200 hover:border-amber-400 transition-all shadow-xs" />
+                  <span class="absolute inset-0 bg-stone-950/20 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center text-white">
+                    <i data-lucide="zoom-in" class="w-4 h-4"></i>
+                  </span>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        `;
+      }
+
+      // Render Sources Accordion
+      let sourcesHtml = "";
+      if (data.sources && data.sources.length > 0) {
+        sourcesHtml = `
+          <div class="mt-4 pt-3 border-t border-stone-100">
+            <details class="group">
+              <summary class="text-xs font-semibold text-stone-600 hover:text-stone-900 cursor-pointer list-none flex items-center justify-between">
+                <span class="flex items-center space-x-1.5">
+                  <i data-lucide="layers" class="w-3.5 h-3.5 text-stone-400"></i>
+                  <span>Inspect ${data.sources.length} Retrieved Source Chunks</span>
+                </span>
+                <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-stone-400 group-open:rotate-180 transition-transform"></i>
+              </summary>
+              <div class="mt-2 space-y-2">
+                ${data.sources.map((s, idx) => `
+                  <div class="bg-stone-50 rounded-xl p-3 border border-stone-200/80 text-xs text-stone-700">
+                    <div class="flex items-center justify-between mb-1">
+                      <span class="font-bold text-stone-900">[${idx+1}] ${s.breadcrumb || s.id}</span>
+                      <span class="text-[10px] bg-white px-2 py-0.5 rounded border border-stone-200 text-stone-500 font-mono">RRF: ${s.score.toFixed(4)}</span>
+                    </div>
+                    <p class="text-[11px] text-stone-600 line-clamp-3">${escapeHtml(s.text || "")}</p>
+                  </div>
+                `).join("")}
+              </div>
+            </details>
+          </div>
+        `;
+      }
+
+      el.innerHTML = `
+        <div class="w-8 h-8 rounded-xl bg-beige-100 border border-beige-200 flex items-center justify-center text-stone-800 shrink-0">
+          <i data-lucide="bot" class="w-4 h-4"></i>
+        </div>
+        <div class="bg-white border border-stone-200 rounded-2xl rounded-tl-sm p-5 shadow-xs max-w-3xl text-sm text-stone-800 flex-1">
+          <div class="prose-custom">${htmlAnswer}</div>
+          ${imagesHtml}
+          ${sourcesHtml}
+        </div>
+      `;
+
+      // Render any embedded mermaid diagrams in the assistant message
+      el.querySelectorAll("pre code.language-mermaid").forEach((block) => {
+        const code = block.textContent;
+        const container = document.createElement("div");
+        container.className = "mermaid-box";
+        mermaid.render(`mermaid-${Date.now()}`, code).then(({ svg }) => {
+          container.innerHTML = svg;
+          block.parentElement.replaceWith(container);
+        }).catch(() => {});
+      });
+
+      const chat = document.getElementById("chat-messages");
+      chat.scrollTop = chat.scrollHeight;
+      lucide.createIcons();
+    }
+
+    function updateAssistantError(id, errMsg) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.innerHTML = `
+        <div class="w-8 h-8 rounded-xl bg-rose-100 border border-rose-200 flex items-center justify-center text-rose-800 shrink-0">
+          <i data-lucide="alert-circle" class="w-4 h-4"></i>
+        </div>
+        <div class="bg-rose-50 border border-rose-200 rounded-2xl rounded-tl-sm p-4 text-xs text-rose-800">
+          <strong>Query Error:</strong> ${escapeHtml(errMsg)}
+        </div>
+      `;
+      lucide.createIcons();
+    }
+
+    // -------------------------------------------------------------------------
+    // TAB 2: HYBRID SEARCH LOGIC
+    // -------------------------------------------------------------------------
+    async function handleExecuteSearch(e) {
+      if (e) e.preventDefault();
+      const input = document.getElementById("search-input");
+      const query = input.value.trim();
+      const topK = Number(document.getElementById("search-topk").value) || 5;
+
+      if (!query || !currentProject) return;
+
+      const container = document.getElementById("search-results");
+      container.innerHTML = `
+        <div class="text-center py-12 text-stone-500 text-xs flex items-center justify-center space-x-2">
+          <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+          <span>Searching vector index & full-text inverted index...</span>
+        </div>
+      `;
+
+      try {
+        const res = await fetch("/api/rag/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query,
+            projectId: currentProject.projectId,
+            topK,
+          }),
+        });
+
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error);
+
+        if (data.results.length === 0) {
+          container.innerHTML = `<div class="text-center py-12 text-stone-400 text-xs">No matching sections found for "${escapeHtml(query)}"</div>`;
+          return;
+        }
+
+        container.innerHTML = data.results.map((r, i) => `
+          <div class="bg-white rounded-2xl border border-stone-200 p-5 shadow-xs hover:border-stone-300 transition-all">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <div class="flex items-center space-x-2">
+                <span class="w-6 h-6 rounded-lg bg-beige-100 text-stone-800 font-bold text-xs flex items-center justify-center">#${i+1}</span>
+                <span class="font-bold text-sm text-stone-900">${escapeHtml(r.metadata?.breadcrumb || r.chunkId)}</span>
+              </div>
+              <span class="text-xs bg-stone-100 text-stone-700 px-2 py-0.5 rounded-full font-mono">RRF Score: ${r.rrfScore.toFixed(4)}</span>
+            </div>
+            
+            <p class="text-xs text-stone-600 leading-relaxed mb-3 font-mono bg-stone-50 p-3 rounded-xl border border-stone-150 line-clamp-4">
+              ${escapeHtml(r.text)}
+            </p>
+
+            <div class="flex items-center justify-between text-[11px] text-stone-400">
+              <span>Length: ${r.tokenCount} tokens • Chapter: ${r.metadata?.chapterNumber || 1}</span>
+              <button onclick="jumpToToc('${r.chunkId}')" class="text-amber-800 hover:text-amber-900 font-semibold flex items-center space-x-1">
+                <span>Read Section</span>
+                <i data-lucide="arrow-right" class="w-3 h-3"></i>
+              </button>
+            </div>
+          </div>
+        `).join("");
+
+        lucide.createIcons();
+      } catch (err) {
+        container.innerHTML = `<div class="text-center py-8 text-rose-600 text-xs">Search Error: ${err.message}</div>`;
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // TAB 3: TABLE OF CONTENTS & SECTION READER LOGIC
+    // -------------------------------------------------------------------------
+    async function loadTableOfContents() {
+      if (!currentProject) return;
+      try {
+        const res = await fetch(`/api/projects/${currentProject.projectId}/sections`);
+        const json = await res.json();
+        currentSections = json.data || [];
+
+        document.getElementById("toc-count").textContent = `${currentSections.length} sections`;
+        renderTocList(currentSections);
+
+        if (currentSections.length > 0) {
+          showSection(0);
+        }
+      } catch (err) {
+        console.error("TOC Load error:", err);
+      }
+    }
+
+    function renderTocList(sections) {
+      const list = document.getElementById("toc-list");
+      list.innerHTML = sections.map((s, idx) => {
+        const title = s.subtopicTitle || s.chapterTitle || s.breadcrumb || s.chunkId;
+        const ch = s.chapterNumber ? `Ch ${s.chapterNumber}` : "Intro";
+        return `
+          <button 
+            onclick="showSection(${idx})"
+            id="toc-item-${idx}"
+            class="toc-item text-left w-full px-3 py-2 rounded-xl text-xs hover:bg-stone-100 transition-colors flex items-center justify-between group border border-transparent ${idx === currentSectionIndex ? 'bg-beige-100/70 border-beige-200 font-semibold text-stone-900' : 'text-stone-700'}"
+          >
+            <div class="truncate pr-2">
+              <span class="text-[10px] text-stone-400 font-mono block">${ch}</span>
+              <span class="truncate block">${escapeHtml(title)}</span>
+            </div>
+            ${s.hasDiagrams ? '<span class="text-[10px] bg-amber-50 text-amber-800 border border-amber-200 px-1 rounded shrink-0">diag</span>' : ''}
+          </button>
+        `;
+      }).join("");
+    }
+
+    function filterTocItems(query) {
+      const q = query.toLowerCase();
+      const filtered = currentSections.filter(s => 
+        (s.subtopicTitle || "").toLowerCase().includes(q) ||
+        (s.breadcrumb || "").toLowerCase().includes(q) ||
+        (s.chapterTitle || "").toLowerCase().includes(q)
+      );
+      renderTocList(filtered);
+    }
+
+    function showSection(idx) {
+      if (!currentSections[idx]) return;
+      currentSectionIndex = idx;
+
+      document.querySelectorAll(".toc-item").forEach(el => el.classList.remove("bg-beige-100/70", "border-beige-200", "font-semibold"));
+      const currentTocBtn = document.getElementById(`toc-item-${idx}`);
+      if (currentTocBtn) currentTocBtn.classList.add("bg-beige-100/70", "border-beige-200", "font-semibold");
+
+      const section = currentSections[idx];
+      document.getElementById("reader-chapter").textContent = `Chapter ${section.chapterNumber || 1} • ${section.chapterTitle || 'Section'}`;
+      document.getElementById("reader-title").textContent = section.subtopicTitle || section.breadcrumb || section.chunkId;
+      document.getElementById("reader-breadcrumb").textContent = `${section.breadcrumb} (${section.tokenCount} tokens)`;
+
+      const readerBody = document.getElementById("reader-body");
+      readerBody.innerHTML = marked.parse(section.text || "No text available");
+
+      // Replace markdown images in section with responsive figures
+      readerBody.querySelectorAll("img").forEach(img => {
+        img.className = "rounded-xl border border-stone-200 my-4 shadow-sm max-h-96 object-contain cursor-pointer";
+        img.onclick = () => openImageModal(img.src, "Section Figure");
+      });
+
+      // Render mermaid diagrams in section reader
+      readerBody.querySelectorAll("pre code.language-mermaid").forEach((block) => {
+        const code = block.textContent;
+        const container = document.createElement("div");
+        container.className = "mermaid-box";
+        mermaid.render(`mermaid-reader-${Date.now()}`, code).then(({ svg }) => {
+          container.innerHTML = svg;
+          block.parentElement.replaceWith(container);
+        }).catch(() => {});
+      });
+
+      lucide.createIcons();
+    }
+
+    function navigateSection(delta) {
+      const newIdx = currentSectionIndex + delta;
+      if (newIdx >= 0 && newIdx < currentSections.length) {
+        showSection(newIdx);
+      }
+    }
+
+    function jumpToToc(chunkId) {
+      switchTab('toc');
+      const idx = currentSections.findIndex(s => s.chunkId === chunkId);
+      if (idx !== -1) {
+        showSection(idx);
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // TAB 4: VISUAL & DIAGRAM GALLERY LOGIC
+    // -------------------------------------------------------------------------
+    async function loadVisualGallery() {
+      if (!currentProject) return;
+      try {
+        const res = await fetch(`/api/projects/${currentProject.projectId}/visuals`);
+        const json = await res.json();
+        currentVisuals = json.data || [];
+
+        const imgCount = currentVisuals.filter(v => v.type === "image").length;
+        const diagCount = currentVisuals.filter(v => v.type === "mermaid").length;
+
+        document.getElementById("gal-count-all").textContent = currentVisuals.length;
+        document.getElementById("gal-count-img").textContent = imgCount;
+        document.getElementById("gal-count-diag").textContent = diagCount;
+
+        renderGalleryGrid("ALL");
+      } catch (err) {
+        console.error("Gallery load error:", err);
+      }
+    }
+
+    function filterGallery(filterType) {
+      document.querySelectorAll(".gal-filter-btn").forEach(btn => {
+        btn.classList.remove("bg-stone-900", "text-white");
+        btn.classList.add("text-stone-600");
+      });
+      const activeBtn = document.getElementById(`gal-filter-${filterType}`);
+      if (activeBtn) {
+        activeBtn.classList.add("bg-stone-900", "text-white");
+        activeBtn.classList.remove("text-stone-600");
+      }
+
+      renderGalleryGrid(filterType);
+    }
+
+    function renderGalleryGrid(filterType) {
+      const grid = document.getElementById("gallery-grid");
+      const filtered = currentVisuals.filter(v => {
+        if (filterType === "IMAGE") return v.type === "image";
+        if (filterType === "MERMAID") return v.type === "mermaid";
+        return true;
+      });
+
+      if (filtered.length === 0) {
+        grid.innerHTML = `<div class="col-span-full text-center py-12 text-stone-400 text-xs">No visual assets match this filter.</div>`;
+        return;
+      }
+
+      grid.innerHTML = filtered.map((item, idx) => {
+        if (item.type === "image") {
+          return `
+            <div class="bg-white rounded-2xl border border-stone-200 overflow-hidden shadow-xs hover:shadow-sm hover:border-stone-300 transition-all flex flex-col group">
+              <div class="h-44 bg-stone-100 flex items-center justify-center overflow-hidden relative cursor-pointer" onclick="openImageModal('/${item.url}', '${escapeHtml(item.title)}')">
+                <img src="/${item.url}" alt="${escapeHtml(item.title)}" class="w-full h-full object-cover group-hover:scale-102 transition-transform duration-300" />
+                <span class="absolute top-2 right-2 bg-stone-900/70 text-white text-[10px] font-semibold px-2 py-0.5 rounded-full backdrop-blur-xs">
+                  ${item.page ? `Page ${item.page}` : 'Figure'}
+                </span>
+              </div>
+              <div class="p-4 flex-1 flex flex-col justify-between">
+                <div>
+                  <h4 class="text-xs font-bold text-stone-900 line-clamp-1 mb-1">${escapeHtml(item.title)}</h4>
+                  <p class="text-[11px] text-stone-400 line-clamp-1">${escapeHtml(item.breadcrumb)}</p>
+                </div>
+                <div class="mt-3 pt-3 border-t border-stone-100 flex justify-between items-center text-xs">
+                  <span class="text-[10px] text-stone-500 uppercase font-semibold">Image</span>
+                  <button onclick="openImageModal('/${item.url}', '${escapeHtml(item.title)}')" class="text-amber-800 hover:text-amber-900 font-semibold flex items-center space-x-1">
+                    <span>Inspect</span>
+                    <i data-lucide="zoom-in" class="w-3.5 h-3.5"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+          `;
+        } else {
+          return `
+            <div class="bg-white rounded-2xl border border-stone-200 overflow-hidden shadow-xs hover:shadow-sm hover:border-stone-300 transition-all flex flex-col">
+              <div class="h-44 bg-stone-50 p-4 border-b border-stone-100 flex items-center justify-center overflow-auto font-mono text-[10px] text-stone-600">
+                <pre class="whitespace-pre-wrap max-h-36">${escapeHtml(item.code || "")}</pre>
+              </div>
+              <div class="p-4 flex-1 flex flex-col justify-between">
+                <div>
+                  <div class="flex items-center space-x-1.5 mb-1">
+                    <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+                    <h4 class="text-xs font-bold text-stone-900 line-clamp-1">${escapeHtml(item.title)}</h4>
+                  </div>
+                  <p class="text-[11px] text-stone-400 line-clamp-1">${escapeHtml(item.breadcrumb)}</p>
+                </div>
+                <div class="mt-3 pt-3 border-t border-stone-100 flex justify-between items-center text-xs">
+                  <span class="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded font-semibold">Mermaid</span>
+                  <button onclick="jumpToToc('${item.id}')" class="text-stone-600 hover:text-stone-900 font-semibold flex items-center space-x-1">
+                    <span>View Section</span>
+                    <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+          `;
+        }
+      }).join("");
+
+      lucide.createIcons();
+    }
+
+    // -------------------------------------------------------------------------
+    // TAB 5: PDF INGESTION & SSE PROGRESS
+    // -------------------------------------------------------------------------
+    function handleDragOver(e) {
+      e.preventDefault();
+      document.getElementById("dropzone").classList.add("border-stone-500", "bg-beige-100/30");
+    }
+    function handleDragLeave(e) {
+      e.preventDefault();
+      document.getElementById("dropzone").classList.remove("border-stone-500", "bg-beige-100/30");
+    }
+    function handleDrop(e) {
+      e.preventDefault();
+      document.getElementById("dropzone").classList.remove("border-stone-500", "bg-beige-100/30");
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+        handleFileSelected(e.dataTransfer.files);
+      }
+    }
+
+    function handleFileSelected(files) {
+      if (!files || !files[0]) return;
+      selectedFileForIngest = files[0];
+      document.getElementById("dropzone-label").textContent = `Selected: ${selectedFileForIngest.name} (${(selectedFileForIngest.size / (1024*1024)).toFixed(1)} MB)`;
+    }
+
+    async function handleIngestPdf(e) {
+      e.preventDefault();
+      if (!selectedFileForIngest) {
+        alert("Please select a PDF file first.");
+        return;
+      }
+
+      const projName = document.getElementById("ingest-project-name").value.trim();
+      const tokenSize = document.getElementById("ingest-token-size").value;
+      const overlap = document.getElementById("ingest-overlap").value;
+
+      const progressBox = document.getElementById("ingest-progress-box");
+      const progressLog = document.getElementById("ingest-log");
+      const submitBtn = document.getElementById("ingest-submit-btn");
+
+      progressBox.classList.remove("hidden");
+      progressLog.innerHTML = `<div>[Upload] Preparing multipart stream...</div>`;
+      submitBtn.disabled = true;
+
+      const formData = new FormData();
+      formData.append("file", selectedFileForIngest);
+      if (projName) formData.append("projectName", projName);
+      formData.append("childTokenSize", tokenSize);
+      formData.append("childOverlap", overlap);
+
+      try {
+        const response = await fetch("/api/projects/ingest?stream=true", {
+          method: "POST",
+          body: formData,
+        });
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n\n");
+          buffer = lines.pop();
+
+          for (const chunk of lines) {
+            if (chunk.startsWith("event: progress")) {
+              const dataStr = chunk.split("data: ")[1];
+              if (dataStr) {
+                const data = JSON.parse(dataStr);
+                const logItem = document.createElement("div");
+                logItem.textContent = `• ${data.message}`;
+                progressLog.appendChild(logItem);
+                progressLog.scrollTop = progressLog.scrollHeight;
+              }
+            } else if (chunk.startsWith("event: complete")) {
+              const dataStr = chunk.split("data: ")[1];
+              const data = JSON.parse(dataStr);
+              const logItem = document.createElement("div");
+              logItem.className = "text-emerald-400 font-bold";
+              logItem.textContent = `✓ Ingestion complete! Reloading projects...`;
+              progressLog.appendChild(logItem);
+              
+              await loadProjects();
+              setTimeout(() => {
+                switchTab('qa');
+                alert("Book successfully ingested! You can now ask questions.");
+              }, 1000);
+            } else if (chunk.startsWith("event: error")) {
+              const dataStr = chunk.split("data: ")[1];
+              const data = JSON.parse(dataStr);
+              alert("Ingestion error: " + data.error);
+            }
+          }
+        }
+      } catch (err) {
+        alert("Upload error: " + err.message);
+      } finally {
+        submitBtn.disabled = false;
+      }
+    }
+
+    // Lightbox Modal
+    function openImageModal(imgSrc, title) {
+      const modal = document.getElementById("image-modal");
+      document.getElementById("modal-img").src = imgSrc;
+      document.getElementById("modal-title").textContent = title || "Figure Preview";
+      document.getElementById("modal-download").href = imgSrc;
+      modal.classList.remove("hidden");
+    }
+
+    function closeImageModal() {
+      document.getElementById("image-modal").classList.add("hidden");
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement("div");
+      div.textContent = text;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>
