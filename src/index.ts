@@ -6,7 +6,7 @@ import { PinconeStore } from "./lib/db/pc_store.js";
 import { mongoParentStore } from "./lib/db/mongo_store.js";
 import { mongoProjectStore } from "./lib/db/project_store.js";
 import { llm } from "./lib/llm/embedding.js";
-import { InteractiveTUI } from "./transport/tui.js";
+import { InteractiveTUI } from "./transport/cli/index.js";
 
 config();
 dns.setServers(["8.8.8.8", "8.8.4.4"]);

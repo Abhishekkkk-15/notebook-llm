@@ -2,8 +2,8 @@ import fs from "fs";
 import path from "path";
 import * as p from "@clack/prompts";
 import terminalImage from "terminal-image";
-import { RAGPipeline } from "../service/rag_pipeline.js";
-import type { IProjectDoc } from "../lib/db/project.model.js";
+import { RAGPipeline } from "../../service/rag_pipeline.js";
+import type { IProjectDoc } from "../../lib/db/project.model.js";
 import { pickPdfFile } from "./file_picker.js";
 import {
   printAnswerCard,
