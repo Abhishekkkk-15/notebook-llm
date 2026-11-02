@@ -49,12 +49,13 @@ interface Cell {
 
 interface ProcessedLine {
   y: number;
+  h: number;
   cells: Cell[];
   rawText: string;
 }
 
 /**
- * Groups raw text items on a visual line into merged cells if gaps between them are small (<= 14px).
+ * Groups raw text items on a visual line into merged cells if gaps between them are within word spacing (<= 8px).
  */
 function groupItemsIntoCells(items: TextItem[]): Cell[] {
   if (items.length === 0) return [];
@@ -91,57 +92,151 @@ function groupItemsIntoCells(items: TextItem[]): Cell[] {
 }
 
 /**
- * Checks if a line is a bullet point or numbered/labeled list item (NOT a table row).
+ * Universal Bullet & Enumeration Detection (Document-Agnostic).
+ * Detects Unicode bullets, numbers, letters, roman numerals, or generic short labels without hardcoding.
  */
 function isBulletOrListLine(line: ProcessedLine): boolean {
   if (line.cells.length === 0) return false;
   const first = line.cells[0]!.str.trim();
 
-  const isSymbolBullet = /^[•\-\*–—▪▫◦\u2022\u25cf\u25cb\u25aa]/.test(first) || first === "o" || first === "O";
-  const isLabelBullet =
-    /^(?:(?:\(?\d+[\.\)]|\(?[a-zA-Z][\.\)]|\b(?:CLO|CO|PEO|PSO|Stmt|Step|Section|Q|Fig|Figure)\s*[-–\.:]?\s*\d*))\b/i.test(
+  // A. Common Unicode bullet symbols & wrap arrows
+  const isSymbolBullet =
+    /^[•\-\*–—▪▫◦\u2022\u25cf\u25cb\u25aa\u25ba\u25b6\u2713\u2714\u2043\u2219\u21aa\u21b5\u21b3\u2190-\u21ff\u2794]/.test(
       first,
-    );
+    ) ||
+    first === "o" ||
+    first === "O";
 
-  if (isSymbolBullet || isLabelBullet) {
-    // If line has <= 2 cells, it's definitely a list item (e.g. "•" + "description" or "CLO1" + "text")
+  // B. Standard enumeration: 1., (1), [1], 1.1, a., (a), [A], i., (iv)
+  const isNumberedBullet =
+    /^(?:\(?\d+[\.\)]|\(\d+\)|\[\d+\]|\d+\.\d+(\.\d+)*)\b/.test(first);
+  const isLetterBullet =
+    /^(?:\(?[a-zA-Z][\.\)]|\([a-zA-Z]\)|\[[a-zA-Z]\])\b/.test(first);
+  const isRomanBullet =
+    /^(?:\(?[ivxlcdmIVXLCDM]+[\.\)]|\([ivxlcdmIVXLCDM]+\))\b/.test(first);
+
+  // C. Generic short alphanumeric label (e.g. Step 1, Item 2, Rule 3, Section 4, Q1, Stmt-1, PEO-1, CLO-1)
+  // Exclude Figure/Fig/Table captions
+  const isGenericLabel =
+    !/^(?:figure|fig|table|diagram|chart)\b/i.test(first) &&
+    (/^[A-Za-z]{1,8}[-_ ]?\d{1,4}\s*[:–\.-]?$/i.test(first) ||
+      /^[A-Za-z]{1,8}[-_ ]?\d{1,4}\b/i.test(first));
+
+  // D. Short term definition (e.g. "Note:", "Warning:", "Syntax:")
+  const isTermDefinition =
+    first.endsWith(":") &&
+    line.cells.length === 2 &&
+    first.length <= 25 &&
+    !/^(?:figure|fig|table|diagram|chart)\b/i.test(first);
+
+  if (
+    isSymbolBullet ||
+    isNumberedBullet ||
+    isLetterBullet ||
+    isRomanBullet ||
+    isGenericLabel ||
+    isTermDefinition
+  ) {
     if (line.cells.length <= 2) return true;
-
-    // Check if remaining cells are just wrapped parts of a single sentence
-    const totalW = line.cells.reduce((s, c) => s + c.w, 0);
-    if (totalW > 300 && line.cells.length <= 3) return true;
+    if (
+      line.cells[0]!.w < 55 &&
+      line.cells.slice(1).reduce((sum, c) => sum + c.w, 0) > 180
+    ) {
+      return true;
+    }
   }
+
   return false;
 }
 
 /**
- * Checks if a line is a heading.
+ * Universal Heading Detection (Document-Agnostic).
+ * Identifies headings by typographical structure, length, punctuation, and vertical isolation.
  */
-function isHeadingLine(line: ProcessedLine): boolean {
+function isHeadingLine(
+  line: ProcessedLine,
+  prevLine?: ProcessedLine,
+  nextLine?: ProcessedLine,
+): boolean {
   const text = line.rawText.trim();
   if (!text) return false;
-  return /^(Semester\s+[IVX\d]+|Elective\s+\d+|Track\s+\d+|Course\s+Learning\s+Objectives|Course\s+Outcomes|Suggested\s+Readings|Department\s+Vision|Department\s+Mission|Program\s+Education\s+Objectives|Program\s+Specific\s+Outcomes|\d+\.\s+[A-Z])/i.test(
-    text,
-  );
-}
 
-/**
- * Checks if a line is a note, footer, or body paragraph that signals table termination.
- */
-function isTableTerminator(line: ProcessedLine): boolean {
-  const text = line.rawText.trim();
-  if (!text) return true;
-  if (/^FCS\s*[-–]\s*MCA\s*Syllabus/i.test(text)) return true;
-  if (/^(?:Mandatory\s+Training|COMPULSORY|Note\b|Notes\b|Suggested\s+Readings)/i.test(text)) return true;
+  // Multi-column lines with gutters (> 15px) are table rows/headers, not headings
+  if (line.cells.length >= 2) {
+    const hasGutter = line.cells.some(
+      (c, idx) => idx > 0 && c.x - line.cells[idx - 1]!.x2 > 15,
+    );
+    if (hasGutter) return false;
+  }
+
+  // Headings are concise (< 80 chars, < 14 words)
+  if (text.length > 80 || text.split(/\s+/).length > 14) return false;
+
+  // Headings do not end with sentence punctuation (. , ; ? !)
+  if (/[.,;?!]$/.test(text)) return false;
+
+  // Total text width of heading is compact (< 320px)
+  const totalW = line.cells.reduce((sum, c) => sum + c.w, 0);
+  if (totalW > 320) return false;
+
+  // A. Numbered chapter/section patterns: e.g. "1. Introduction", "2.1 Methods", "Chapter 3"
+  if (
+    /^(?:chapter|section|part|appendix|module|lesson)\s+(?:\d+|[ivxlcdm]+)\b/i.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+  if (/^(?:[0-9]+\.)+[0-9]*\s+[A-Z]/.test(text)) return true;
+
+  // B. Isolated Title Case or UPPERCASE line with vertical whitespace gap
+  const isUpperOrTitle =
+    /^[A-Z0-9\s,:&()/-]{3,60}$/.test(text) ||
+    /^[A-Z][a-z0-9]+(\s+[A-Z0-9][a-z0-9]*)*$/.test(text);
+
+  if (isUpperOrTitle) {
+    const hasGapAbove = prevLine ? Math.abs(prevLine.y - line.y) >= 16 : true;
+    const hasGapBelow = nextLine ? Math.abs(line.y - nextLine.y) >= 12 : true;
+    if (hasGapAbove || hasGapBelow) return true;
+  }
+
   return false;
 }
 
 /**
- * Clusters cell X coordinates into stable column anchors based on frequency.
+ * Universal Running Header / Footer Detection (Document-Agnostic).
+ * Strips running page numbers, document titles, or recurring text in margin zones.
+ */
+function isRunningHeaderOrFooter(
+  line: ProcessedLine,
+  pageHeight: number = 792,
+): boolean {
+  const text = line.rawText.trim();
+  if (!text) return false;
+
+  // Extreme top (> 93% of page) or extreme bottom (< 7% of page)
+  const isMarginZone = line.y > pageHeight * 0.93 || line.y < pageHeight * 0.07;
+  if (!isMarginZone) return false;
+
+  // Common pagination patterns: "Page 1", "1 / 45", "1 of 20", "Doc Title / 1", single standalone number
+  if (
+    /^(?:page\s*\d+|\d+\s*[\/|]\s*\d+|\d+\s+of\s+\d+|.+?\s*[\/|]\s*\d+|\d+)$/i.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Clusters cell X coordinates into stable column anchors based on recurrence.
  */
 function findColumnAnchors(lines: ProcessedLine[]): number[] {
   const allX: number[] = [];
   let multiCellLineCount = 0;
+
   for (const l of lines) {
     if (l.cells.length >= 2) {
       multiCellLineCount++;
@@ -166,8 +261,11 @@ function findColumnAnchors(lines: ProcessedLine[]): number[] {
     }
   }
 
-  // Minimum frequency based on multi-cell lines, so tables with many continuation lines aren't penalized
-  const minFreq = multiCellLineCount <= 4 ? 2 : Math.max(2, Math.ceil(multiCellLineCount * 0.15));
+  // Minimum frequency based on multi-cell lines to preserve tables with many continuation lines
+  const minFreq =
+    multiCellLineCount <= 4 ? 2 : (
+      Math.max(2, Math.ceil(multiCellLineCount * 0.15))
+    );
   const validClusters = clusters
     .filter((cl) => cl.count >= minFreq)
     .map((cl) => cl.mean)
@@ -218,7 +316,7 @@ function formatTable(lines: ProcessedLine[], anchors: number[]): string {
     // Line starts a new row if:
     // 1. It is the header line (first line)
     // 2. Col 0 is present (e.g. Unit 1, Unit 2 or SEM I, II or Course Code or PEO-1)
-    // 3. In dense multi-column tables (>= 4 cols), having col 1 or col 2 along with dense columns (for rows where col 0 is blank/spanned)
+    // 3. In dense multi-column tables (>= 4 cols), having col 1 or col 2 along with dense columns
     const isNewRow =
       !currentRow ||
       hasCol0 ||
@@ -232,9 +330,8 @@ function formatTable(lines: ProcessedLine[], anchors: number[]): string {
     // Accumulate cell content into currentRow
     for (const [cIdx, val] of colCells.entries()) {
       if (cIdx < colCount) {
-        currentRow![cIdx] = currentRow![cIdx]
-          ? `${currentRow![cIdx]} ${val}`
-          : val;
+        currentRow![cIdx] =
+          currentRow![cIdx] ? `${currentRow![cIdx]} ${val}` : val;
       }
     }
   }
@@ -266,20 +363,42 @@ function formatTable(lines: ProcessedLine[], anchors: number[]): string {
   return mdLines.join("\n");
 }
 
+function isFigureCaptionLine(line: ProcessedLine): boolean {
+  return /^(?:figure|fig\.?|diagram|chart)\s+\d+[\.\-]?\d*\s*[:\-\.]?\s*(.+)?/i.test(
+    line.rawText.trim(),
+  );
+}
+
+function isDiagramOrVectorLine(line: ProcessedLine): boolean {
+  return /(?:→|-->|->|⇒|~>|<-|<--|←)/.test(line.rawText);
+}
+
+function hasInvalidColumns(lines: ProcessedLine[], anchors: number[]): boolean {
+  if (anchors.length < 2) return true;
+  const hasAnyAlphanumericInCol0 = lines.some((l) => {
+    if (l.cells.length === 0) return false;
+    const c0 = l.cells[0]!;
+    return /[a-zA-Z0-9]/.test(c0.str);
+  });
+  return !hasAnyAlphanumericInCol0;
+}
+
 /**
  * Parses text items on a page, identifies tabular layouts and lists, and converts them to Markdown.
  */
 function parsePageLayoutAndTables(
   items: TextItem[],
   previousCaption?: string,
+  pageHeight: number = 792,
 ): { text: string; carriedCaption: string } {
   // 1. Group items into visual lines by matching Y coordinates
   items.sort((a, b) => (Math.abs(b.y - a.y) > 4 ? b.y - a.y : a.x - b.x));
   const rawLines: ProcessedLine[] = [];
   for (const it of items) {
+    if (!it.str.trim()) continue;
     let l = rawLines.find((line) => Math.abs(line.y - it.y) <= 4);
     if (!l) {
-      l = { y: it.y, cells: [], rawText: "" };
+      l = { y: it.y, h: it.h, cells: [], rawText: "" };
       rawLines.push(l);
     }
     l.cells.push(it as any);
@@ -292,76 +411,133 @@ function parsePageLayoutAndTables(
 
   const outputBlocks: string[] = [];
   let pendingCaption = previousCaption || "";
-  const tableCaptionRegex = /^(Table\s+\d+[\-\.:]\d*|\bTable\b)\s*[:\-\.]?\s*(.+)?/i;
+  const tableCaptionRegex =
+    /^(Table\s+\d+[\-\.:]\d*|\bTable\b)\s*[:\-\.]?\s*(.+)?/i;
 
   let i = 0;
   while (i < rawLines.length) {
     const line = rawLines[i]!;
 
-    // Ignore page running headers/footers
-    if (/FCS\s*[-–]\s*MCA\s*Syllabus/i.test(line.rawText)) {
+    // 1. Universal running header / footer filtering
+    if (isRunningHeaderOrFooter(line, pageHeight)) {
       i++;
       continue;
     }
 
-    // Check if this row is a Table Caption
+    // 2. Table Caption Detection
     const captionMatch = line.rawText.match(tableCaptionRegex);
-    if (captionMatch && line.cells.length <= 2 && line.cells.every((c) => c.w < 380)) {
+    if (
+      captionMatch &&
+      line.cells.length <= 2 &&
+      line.cells.every((c) => c.w < 380)
+    ) {
       pendingCaption = line.rawText;
       i++;
       continue;
     }
 
-    // Heading Line
-    if (isHeadingLine(line)) {
+    // 3. Figure Caption Detection (Vector diagrams / Figures)
+    if (isFigureCaptionLine(line)) {
+      outputBlocks.push(`\n**${line.rawText}**\n`);
+      i++;
+      continue;
+    }
+
+    // 4. Heading Detection
+    const prevLine = i > 0 ? rawLines[i - 1] : undefined;
+    const nextLine = i + 1 < rawLines.length ? rawLines[i + 1] : undefined;
+    if (isHeadingLine(line, prevLine, nextLine)) {
       outputBlocks.push(`\n### ${line.rawText}\n`);
       i++;
       continue;
     }
 
-    // Bullet / Labeled List Item (NOT a table)
+    // 5. Bullet / List Item (NOT a table)
     if (isBulletOrListLine(line)) {
       const first = line.cells[0]!.str;
-      const rest = line.cells.slice(1).map((c) => c.str).join(" ");
+      const rest = line.cells
+        .slice(1)
+        .map((c) => c.str)
+        .join(" ");
       outputBlocks.push(`* **${first}**: ${rest}`);
       i++;
       continue;
     }
 
-    // Check for Table Block
+    // 6. Check for Table Block
     if (line.cells.length >= 2) {
       const candidateLines: ProcessedLine[] = [];
       let k = i;
+      let tableLeft = Math.min(...line.cells.map((c) => c.x));
+      let tableRight = Math.max(...line.cells.map((c) => c.x2));
+      let hitFigure = false;
+      let hitDiagramFlow = false;
+
       while (k < rawLines.length) {
         const next = rawLines[k]!;
+        const prevCandidate =
+          candidateLines.length > 0 ?
+            candidateLines[candidateLines.length - 1]
+          : undefined;
+
+        // Termination checks:
         if (isHeadingLine(next)) break;
         if (isBulletOrListLine(next)) break;
-        if (isTableTerminator(next)) break;
-
-        // Note line like "H - High Correlation..." ends the matrix table
-        if (/^H\s*[-–]\s*High Correlation/i.test(next.rawText)) {
-          candidateLines.push(next);
-          k++;
+        if (isRunningHeaderOrFooter(next, pageHeight)) break;
+        if (isFigureCaptionLine(next)) {
+          hitFigure = true;
           break;
         }
 
+        // Detect diagram flow connectors (arrows etc)
+        if (isDiagramOrVectorLine(next)) {
+          hitDiagramFlow = true;
+        }
+
+        // Large vertical gap jump (> 35px between table lines)
+        if (prevCandidate && Math.abs(prevCandidate.y - next.y) > 35) {
+          break;
+        }
+
+        // Full-width body paragraph starting near left margin
+        if (next.cells.length === 1) {
+          const c0 = next.cells[0]!;
+          const isAtLeftMargin = c0.x <= tableLeft + 20;
+          const isFullWidth =
+            c0.w >= (tableRight - tableLeft) * 0.75 || c0.w > 320;
+          if (isAtLeftMargin && isFullWidth) {
+            break;
+          }
+        }
+
         candidateLines.push(next);
+        tableLeft = Math.min(tableLeft, ...next.cells.map((c) => c.x));
+        tableRight = Math.max(tableRight, ...next.cells.map((c) => c.x2));
         k++;
       }
 
-      const anchors = findColumnAnchors(candidateLines);
-      const multiCellCount = candidateLines.filter((l) => l.cells.length >= 2).length;
+      // Do not convert vector diagrams/figures or invalid column structures to tables
+      if (!hitFigure && !hitDiagramFlow) {
+        const anchors = findColumnAnchors(candidateLines);
+        const multiCellCount = candidateLines.filter(
+          (l) => l.cells.length >= 2,
+        ).length;
 
-      if (anchors.length >= 2 && multiCellCount >= 2) {
-        const mdTable = formatTable(candidateLines, anchors);
-        if (mdTable) {
-          if (pendingCaption) {
-            outputBlocks.push(`\n**${pendingCaption}**\n`);
-            pendingCaption = "";
+        if (
+          anchors.length >= 2 &&
+          multiCellCount >= 2 &&
+          !hasInvalidColumns(candidateLines, anchors)
+        ) {
+          const mdTable = formatTable(candidateLines, anchors);
+          if (mdTable) {
+            if (pendingCaption) {
+              outputBlocks.push(`\n**${pendingCaption}**\n`);
+              pendingCaption = "";
+            }
+            outputBlocks.push(mdTable);
+            i = k;
+            continue;
           }
-          outputBlocks.push(mdTable);
-          i = k;
-          continue;
         }
       }
     }
@@ -386,11 +562,13 @@ async function extractRawPages(doc: any): Promise<RawPage[]> {
 
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i);
+    const viewport = page.getViewport({ scale: 1 });
     const textContent = await page.getTextContent();
 
     const items: TextItem[] = [];
     for (const item of textContent.items as any[]) {
-      if (!item.str || typeof item.str !== "string" || !item.str.trim()) continue;
+      if (!item.str || typeof item.str !== "string" || !item.str.trim())
+        continue;
       items.push({
         str: item.str.trim(),
         x: Math.round(item.transform[4]),
@@ -403,6 +581,7 @@ async function extractRawPages(doc: any): Promise<RawPage[]> {
     const { text, carriedCaption: nextCaption } = parsePageLayoutAndTables(
       items,
       carriedCaption,
+      viewport.height,
     );
     carriedCaption = nextCaption;
 
