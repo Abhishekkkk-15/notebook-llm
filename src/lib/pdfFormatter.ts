@@ -152,14 +152,24 @@ function isBulletOrListLine(line: ProcessedLine): boolean {
 /**
  * Universal Heading Detection (Document-Agnostic).
  * Identifies headings by typographical structure, length, punctuation, and vertical isolation.
+ * Crucially enforces that headings must start near the left margin or be centered across the page,
+ * ensuring indented table cell fragments (like "MACHINE", "WEB", "LEARNING") are never misclassified as headings.
  */
 function isHeadingLine(
   line: ProcessedLine,
   prevLine?: ProcessedLine,
   nextLine?: ProcessedLine,
+  pageWidth: number = 612,
 ): boolean {
   const text = line.rawText.trim();
-  if (!text) return false;
+  if (!text || line.cells.length === 0) return false;
+
+  // A heading MUST start near the left margin (X <= 115) OR be centered across the page
+  const c0 = line.cells[0]!;
+  const isNearLeftMargin = c0.x <= 115;
+  const isCentered =
+    Math.abs(c0.x + c0.w / 2 - pageWidth / 2) <= 35 && c0.w > 80;
+  if (!isNearLeftMargin && !isCentered) return false;
 
   // Multi-column lines with gutters (> 15px) are table rows/headers, not headings
   if (line.cells.length >= 2) {
@@ -282,85 +292,247 @@ function findColumnAnchors(lines: ProcessedLine[]): number[] {
 
 function getColumnIndex(cellX: number, anchors: number[]): number {
   if (anchors.length === 0) return 0;
-  for (let i = 0; i < anchors.length - 1; i++) {
-    const cut = (anchors[i]! + anchors[i + 1]!) / 2;
-    if (cellX < cut) return i;
+  for (let i = anchors.length - 1; i >= 0; i--) {
+    if (cellX >= anchors[i]! - 10) {
+      return i;
+    }
   }
-  return anchors.length - 1;
+  return 0;
 }
 
 /**
- * Assembles table lines into a clean Markdown table with row bounding and multiline cell continuation.
+ * Assembles table lines into a clean Markdown table with multiline header merging,
+ * precise multi-line cell continuation, and column preservation.
  */
-function formatTable(lines: ProcessedLine[], anchors: number[]): string {
+function formatTable(
+  lines: ProcessedLine[],
+  anchors: number[],
+  carriedHeader?: string[],
+): { markdown: string; headerRow: string[] } {
   const colCount = anchors.length;
-  if (colCount < 2 || lines.length === 0) return "";
+  if (colCount < 2 || lines.length === 0) return { markdown: "", headerRow: [] };
 
-  const rows: string[][] = [];
-  let currentRow: string[] | null = null;
-
+  // 1. Separate Header Block vs Data Lines
+  let firstPrimaryIdx = -1;
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i]!;
-    const colCells = new Map<number, string>();
-    for (const c of l.cells) {
+    const c0 = l.cells.find((c) => getColumnIndex(c.x, anchors) === 0)?.str.trim();
+    if (c0 && i > 0 && !/^(sem|unit|sr|s\.?no|#|no|code|course|sl|item)\b/i.test(c0)) {
+      firstPrimaryIdx = i;
+      break;
+    }
+  }
+
+  if (firstPrimaryIdx === -1) {
+    firstPrimaryIdx = lines.findIndex((l) => l.cells.length >= Math.min(3, colCount));
+    if (firstPrimaryIdx === -1) firstPrimaryIdx = 1;
+  }
+
+  // Multi-line header block ends before firstPrimaryIdx
+  let headerEndIdx = firstPrimaryIdx;
+  if (
+    headerEndIdx > 0 &&
+    lines[headerEndIdx - 1]!.cells.length === 1 &&
+    Math.abs(lines[headerEndIdx]!.y - lines[headerEndIdx - 1]!.y) <= 12
+  ) {
+    headerEndIdx--;
+  }
+
+  // 2. Build Header Row by merging all header lines (0 .. headerEndIdx - 1)
+  const headerCells = new Map<number, string>();
+  for (let i = 0; i < headerEndIdx; i++) {
+    for (const c of lines[i]!.cells) {
       const cIdx = getColumnIndex(c.x, anchors);
-      const existing = colCells.get(cIdx);
-      colCells.set(cIdx, existing ? `${existing} ${c.str}` : c.str);
+      const existing = headerCells.get(cIdx);
+      headerCells.set(cIdx, existing ? `${existing} ${c.str}` : c.str);
     }
+  }
 
-    const hasCol0 = colCells.has(0);
-    const hasCol1 = colCells.has(1);
-    const hasCol2 = colCells.has(2);
-    const isDense = colCells.size >= Math.min(3, colCount);
-
-    // Line starts a new row if:
-    // 1. It is the header line (first line)
-    // 2. Col 0 is present (e.g. Unit 1, Unit 2 or SEM I, II or Course Code or PEO-1)
-    // 3. In dense multi-column tables (>= 4 cols), having col 1 or col 2 along with dense columns
-    const isNewRow =
-      !currentRow ||
-      hasCol0 ||
-      (colCount >= 4 && (hasCol1 || hasCol2) && isDense);
-
-    if (isNewRow) {
-      if (currentRow) rows.push(currentRow);
-      currentRow = Array(colCount).fill("");
+  const hRow: string[] = Array(colCount).fill("");
+  for (const [cIdx, val] of headerCells.entries()) {
+    hRow[cIdx] = val.trim();
+  }
+  if (hRow.every((val) => !val) && carriedHeader && carriedHeader.length === colCount) {
+    for (let c = 0; c < colCount; c++) {
+      hRow[c] = carriedHeader[c] || "";
     }
+  }
 
-    // Accumulate cell content into currentRow
-    for (const [cIdx, val] of colCells.entries()) {
-      if (cIdx < colCount) {
-        currentRow![cIdx] =
-          currentRow![cIdx] ? `${currentRow![cIdx]} ${val}` : val;
+  // 3. Identify Primary Rows from data lines (headerEndIdx onwards)
+  interface PrimaryRow {
+    idx: number;
+    y: number;
+    cells: Map<number, string>;
+  }
+
+  const primaryRows: PrimaryRow[] = [];
+  const dataLines = lines.slice(headerEndIdx);
+
+  for (let i = 0; i < dataLines.length; i++) {
+    const l = dataLines[i]!;
+    const cols = new Map<number, string>();
+    for (const c of l.cells) {
+      cols.set(getColumnIndex(c.x, anchors), c.str);
+    }
+    const hasCol0 = cols.has(0);
+    const isDense = cols.size >= Math.min(3, colCount);
+
+    if (hasCol0 || isDense) {
+      primaryRows.push({ idx: i, y: l.y, cells: cols });
+    }
+  }
+
+  if (primaryRows.length === 0) {
+    for (let i = 0; i < dataLines.length; i++) {
+      const l = dataLines[i]!;
+      const cols = new Map<number, string>();
+      for (const c of l.cells) {
+        cols.set(getColumnIndex(c.x, anchors), c.str);
+      }
+      primaryRows.push({ idx: i, y: l.y, cells: cols });
+    }
+  }
+
+  // 4. Two-pass Row Assembly:
+  // First, check which lines between row r-1 and row r belong to row r as top fragments
+  const pulledTopLines = new Set<number>();
+  const topFragmentsPerRow = new Map<number, ProcessedLine[]>();
+
+  for (let r = 0; r < primaryRows.length; r++) {
+    const curr = primaryRows[r]!;
+    const prev = r > 0 ? primaryRows[r - 1] : undefined;
+    const startIdx = prev ? prev.idx + 1 : 0;
+    const endIdx = curr.idx;
+
+    const topFrags: ProcessedLine[] = [];
+
+    // Check lines immediately above curr in ascending Y distance
+    for (let k = endIdx - 1; k >= startIdx; k--) {
+      const frag = dataLines[k]!;
+      const dyCurr = frag.y - curr.y;
+      if (dyCurr > 15 || dyCurr <= 0) break;
+      if (frag.cells.length > 2) break;
+
+      const c0 = frag.cells.find((c) => getColumnIndex(c.x, anchors) === 0);
+      if (c0) break;
+
+      const str = frag.cells[0]!.str.trim();
+      // Top fragments can never start with lowercase or end with sentence punctuation (. or ;)
+      if (/^[a-z]/.test(str) || /[.;]$/.test(str)) {
+        break;
+      }
+
+      // Top title fragments are short (<= 35 chars, <= 160px)
+      if (str.length > 35 || frag.cells[0]!.w > 160) {
+        break;
+      }
+
+      const cIdx = getColumnIndex(frag.cells[0]!.x, anchors);
+      const isColEmptyOnCurr = !curr.cells.has(cIdx);
+      const currCellStr = curr.cells.get(cIdx)?.trim() || "";
+
+      // If current row already has long text in this column (> 25 chars), it does not take top fragments
+      if (currCellStr.length > 25) {
+        break;
+      }
+
+      const prevLinesCount = k - startIdx;
+      const dyPrev = prev ? prev.y - frag.y : Infinity;
+
+      let belongsToCurr = false;
+      if (isColEmptyOnCurr) {
+        belongsToCurr = true;
+      } else if (prevLinesCount > 0 && dyCurr <= 14) {
+        belongsToCurr = true;
+      } else if (prevLinesCount === 0 && dyCurr < dyPrev) {
+        belongsToCurr = true;
+      }
+
+      if (belongsToCurr) {
+        topFrags.unshift(frag);
+        pulledTopLines.add(k);
+      } else {
+        break;
       }
     }
+
+    if (topFrags.length > 0) {
+      topFragmentsPerRow.set(r, topFrags);
+    }
   }
 
-  if (currentRow) rows.push(currentRow);
-  if (rows.length < 2) return "";
+  // Second pass: Assemble each row with its top fragments and its continuation lines below
+  const assembledRows: Map<number, string>[] = [];
 
-  // Prune completely empty columns across all rows
-  const activeColIndices: number[] = [];
+  for (let r = 0; r < primaryRows.length; r++) {
+    const p = primaryRows[r]!;
+    const rowMap = new Map<number, string>(p.cells);
+
+    // Apply top fragments (prepended)
+    const topFrags = topFragmentsPerRow.get(r);
+    if (topFrags) {
+      for (const frag of topFrags) {
+        for (const c of frag.cells) {
+          const cIdx = getColumnIndex(c.x, anchors);
+          const currentVal = rowMap.get(cIdx);
+          rowMap.set(cIdx, currentVal ? `${c.str} ${currentVal}` : c.str);
+        }
+      }
+    }
+
+    // Apply continuation lines below (until next primary row, excluding lines pulled as top frags by next row)
+    const nextIdx = r + 1 < primaryRows.length ? primaryRows[r + 1]!.idx : dataLines.length;
+    for (let k = p.idx + 1; k < nextIdx; k++) {
+      if (pulledTopLines.has(k)) continue;
+      const frag = dataLines[k]!;
+      for (const c of frag.cells) {
+        const cIdx = getColumnIndex(c.x, anchors);
+        const currentVal = rowMap.get(cIdx);
+        rowMap.set(cIdx, currentVal ? `${currentVal} ${c.str}` : c.str);
+      }
+    }
+
+    assembledRows.push(rowMap);
+  }
+
+  // 5. Build Markdown Table
+  const allRows: string[][] = [];
+  allRows.push(hRow);
+
+  for (const rMap of assembledRows) {
+    const r: string[] = Array(colCount).fill("");
+    for (const [cIdx, val] of rMap.entries()) {
+      r[cIdx] = val.trim();
+    }
+    allRows.push(r);
+  }
+
+  // Prune completely empty columns
+  const activeCols: number[] = [];
   for (let c = 0; c < colCount; c++) {
-    const hasData = rows.some((r) => r[c]?.trim().length! > 0);
-    if (hasData) activeColIndices.push(c);
+    if (allRows.some((r) => r[c]?.trim().length! > 0)) {
+      activeCols.push(c);
+    }
   }
-  if (activeColIndices.length < 2) return "";
+  if (activeCols.length < 2) return { markdown: "", headerRow: [] };
 
-  const header = activeColIndices.map((c) => rows[0]![c]?.trim() || " ");
+  const header = activeCols.map((c) => allRows[0]![c]?.trim() || " ");
   const mdLines: string[] = [];
   mdLines.push(`| ${header.join(" | ")} |`);
   mdLines.push(`| ${header.map(() => "---").join(" | ")} |`);
 
-  for (let r = 1; r < rows.length; r++) {
-    const cells = activeColIndices.map((c) => {
-      const txt = rows[r]![c]?.trim() || "";
+  for (let r = 1; r < allRows.length; r++) {
+    const cells = activeCols.map((c) => {
+      const txt = allRows[r]![c]?.trim() || "";
       return txt ? txt.replace(/\|/g, "\\|") : " ";
     });
     mdLines.push(`| ${cells.join(" | ")} |`);
   }
 
-  return mdLines.join("\n");
+  return {
+    markdown: mdLines.join("\n"),
+    headerRow: activeCols.map((c) => allRows[0]![c]?.trim() || ""),
+  };
 }
 
 function isFigureCaptionLine(line: ProcessedLine): boolean {
@@ -390,13 +562,15 @@ function parsePageLayoutAndTables(
   items: TextItem[],
   previousCaption?: string,
   pageHeight: number = 792,
-): { text: string; carriedCaption: string } {
+  pageWidth: number = 612,
+  carriedHeader?: string[],
+): { text: string; carriedCaption: string; carriedHeader?: string[] } {
   // 1. Group items into visual lines by matching Y coordinates
-  items.sort((a, b) => (Math.abs(b.y - a.y) > 4 ? b.y - a.y : a.x - b.x));
+  items.sort((a, b) => (Math.abs(b.y - a.y) > 2.5 ? b.y - a.y : a.x - b.x));
   const rawLines: ProcessedLine[] = [];
   for (const it of items) {
     if (!it.str.trim()) continue;
-    let l = rawLines.find((line) => Math.abs(line.y - it.y) <= 4);
+    let l = rawLines.find((line) => Math.abs(line.y - it.y) <= 2.5);
     if (!l) {
       l = { y: it.y, h: it.h, cells: [], rawText: "" };
       rawLines.push(l);
@@ -411,6 +585,7 @@ function parsePageLayoutAndTables(
 
   const outputBlocks: string[] = [];
   let pendingCaption = previousCaption || "";
+  let lastActiveHeader = carriedHeader;
   const tableCaptionRegex =
     /^(Table\s+\d+[\-\.:]\d*|\bTable\b)\s*[:\-\.]?\s*(.+)?/i;
 
@@ -443,10 +618,10 @@ function parsePageLayoutAndTables(
       continue;
     }
 
-    // 4. Heading Detection
+    // 4. Heading Detection (passes pageWidth to verify margin/centering)
     const prevLine = i > 0 ? rawLines[i - 1] : undefined;
     const nextLine = i + 1 < rawLines.length ? rawLines[i + 1] : undefined;
-    if (isHeadingLine(line, prevLine, nextLine)) {
+    if (isHeadingLine(line, prevLine, nextLine, pageWidth)) {
       outputBlocks.push(`\n### ${line.rawText}\n`);
       i++;
       continue;
@@ -465,7 +640,16 @@ function parsePageLayoutAndTables(
     }
 
     // 6. Check for Table Block
-    if (line.cells.length >= 2) {
+    // Starts if line has >= 2 cells OR if line is indented cell continuation of upcoming table
+    const isCandidateStart =
+      line.cells.length >= 2 ||
+      (line.cells.length === 1 &&
+        line.cells[0]!.x > 115 &&
+        i + 1 < rawLines.length &&
+        rawLines[i + 1]!.cells.length >= 2 &&
+        Math.abs(line.y - rawLines[i + 1]!.y) <= 12);
+
+    if (isCandidateStart) {
       const candidateLines: ProcessedLine[] = [];
       let k = i;
       let tableLeft = Math.min(...line.cells.map((c) => c.x));
@@ -481,7 +665,7 @@ function parsePageLayoutAndTables(
           : undefined;
 
         // Termination checks:
-        if (isHeadingLine(next)) break;
+        if (isHeadingLine(next, undefined, undefined, pageWidth)) break;
         if (isBulletOrListLine(next)) break;
         if (isRunningHeaderOrFooter(next, pageHeight)) break;
         if (isFigureCaptionLine(next)) {
@@ -500,9 +684,9 @@ function parsePageLayoutAndTables(
         }
 
         // Full-width body paragraph starting near left margin
-        if (next.cells.length === 1) {
+        if (candidateLines.length > 0 && next.cells.length === 1) {
           const c0 = next.cells[0]!;
-          const isAtLeftMargin = c0.x <= tableLeft + 20;
+          const isAtLeftMargin = c0.x <= 115 && c0.x <= tableLeft + 20;
           const isFullWidth =
             c0.w >= (tableRight - tableLeft) * 0.75 || c0.w > 320;
           if (isAtLeftMargin && isFullWidth) {
@@ -528,13 +712,18 @@ function parsePageLayoutAndTables(
           multiCellCount >= 2 &&
           !hasInvalidColumns(candidateLines, anchors)
         ) {
-          const mdTable = formatTable(candidateLines, anchors);
+          const { markdown: mdTable, headerRow } = formatTable(
+            candidateLines,
+            anchors,
+            lastActiveHeader,
+          );
           if (mdTable) {
             if (pendingCaption) {
               outputBlocks.push(`\n**${pendingCaption}**\n`);
               pendingCaption = "";
             }
             outputBlocks.push(mdTable);
+            lastActiveHeader = headerRow;
             i = k;
             continue;
           }
@@ -550,6 +739,7 @@ function parsePageLayoutAndTables(
   return {
     text: outputBlocks.join("\n\n"),
     carriedCaption: pendingCaption,
+    carriedHeader: lastActiveHeader,
   };
 }
 
@@ -559,6 +749,7 @@ function parsePageLayoutAndTables(
 async function extractRawPages(doc: any): Promise<RawPage[]> {
   const pages: RawPage[] = [];
   let carriedCaption = "";
+  let carriedHeader: string[] | undefined = undefined;
 
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i);
@@ -578,12 +769,19 @@ async function extractRawPages(doc: any): Promise<RawPage[]> {
       });
     }
 
-    const { text, carriedCaption: nextCaption } = parsePageLayoutAndTables(
+    const {
+      text,
+      carriedCaption: nextCaption,
+      carriedHeader: nextHeader,
+    } = parsePageLayoutAndTables(
       items,
       carriedCaption,
       viewport.height,
+      viewport.width,
+      carriedHeader,
     );
     carriedCaption = nextCaption;
+    carriedHeader = nextHeader;
 
     pages.push({ pageNum: i, text: text.trim() });
   }
