@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { exec } from "child_process";
 import terminalImage from "terminal-image";
+import { renderMermaidASCII } from "beautiful-mermaid";
 
 export const c = {
   reset: "\x1b[0m",
@@ -47,11 +48,51 @@ export function formatInline(text: string): string {
     .replace(/`([^`\n]+)`/g, `${c.cyanBright}$1${c.reset}`);
 }
 
+/**
+ * Renders a Mermaid flowchart / architecture diagram into clean ASCII/Unicode art.
+ * Automatically falls back to syntax-highlighted code block if diagram syntax fails.
+ */
+export function renderMermaidDiagram(code: string): string {
+  const termWidth = Math.max(40, (process.stdout.columns || 80) - 2);
+  const cleanCode = code.trim();
+
+  try {
+    const ascii = renderMermaidASCII(cleanCode, {
+      useAscii: false,
+      colorMode: "truecolor",
+    });
+
+    const lines = ascii.split("\n");
+    const out: string[] = [
+      `\n\x1b[36m╭── 📊 Flowchart / Architecture Diagram ${"─".repeat(Math.max(4, termWidth - 36))}╮\x1b[0m`,
+    ];
+    for (const l of lines) {
+      out.push(`\x1b[36m│\x1b[0m  ${l}`);
+    }
+    out.push(`\x1b[36m╰${"─".repeat(termWidth)}\x1b[0m\n`);
+    return out.join("\n");
+  } catch {
+    // Fallback if diagram parsing fails
+    const out: string[] = [
+      `\n${c.muted}  ┌─ ${c.amberBright}[📊 Mermaid Flowchart]${c.muted} ${"─".repeat(Math.max(10, termWidth - 30))}${c.reset}`,
+    ];
+    for (const l of cleanCode.split("\n")) {
+      const styled = l
+        .replace(/-->|->|→/g, `${c.amberBright}──▶${c.reset}`)
+        .replace(/\["?(.*?)"?\]/g, `${c.cyanBright}[$1]${c.reset}`);
+      out.push(`  ${c.muted}│${c.reset}   ${styled}`);
+    }
+    out.push(`${c.muted}  └${"─".repeat(Math.max(20, termWidth - 10))}${c.reset}\n`);
+    return out.join("\n");
+  }
+}
+
 export function renderMarkdown(raw: string): string {
   const lines = raw.split("\n");
   const formatted: string[] = [];
   let inCodeBlock = false;
   let codeLanguage = "";
+  let mermaidBuffer: string[] = [];
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
@@ -62,29 +103,35 @@ export function renderMarkdown(raw: string): string {
       if (!inCodeBlock) {
         inCodeBlock = true;
         codeLanguage = (codeFenceMatch[1] || "").toLowerCase();
-        const isMermaid = codeLanguage === "mermaid";
-        const badge = isMermaid
-          ? "📊 Mermaid Flowchart"
-          : codeLanguage
-            ? codeLanguage.toUpperCase()
-            : "CODE";
-        formatted.push(
-          `\n${c.muted}  ┌─ ${isMermaid ? c.amberBright : c.cyan}[${badge}]${c.muted} ${"─".repeat(35)}${c.reset}`,
-        );
+        const isMermaid =
+          codeLanguage === "mermaid" ||
+          codeLanguage === "flowchart" ||
+          codeLanguage === "graph";
+        if (isMermaid) {
+          codeLanguage = "mermaid";
+          mermaidBuffer = [];
+        } else {
+          const badge = codeLanguage ? codeLanguage.toUpperCase() : "CODE";
+          formatted.push(
+            `\n${c.muted}  ┌─ ${c.cyan}[${badge}]${c.muted} ${"─".repeat(35)}${c.reset}`,
+          );
+        }
       } else {
+        if (codeLanguage === "mermaid") {
+          formatted.push(renderMermaidDiagram(mermaidBuffer.join("\n")));
+          mermaidBuffer = [];
+        } else {
+          formatted.push(`${c.muted}  └${"─".repeat(50)}${c.reset}\n`);
+        }
         inCodeBlock = false;
         codeLanguage = "";
-        formatted.push(`${c.muted}  └${"─".repeat(50)}${c.reset}\n`);
       }
       continue;
     }
 
     if (inCodeBlock) {
       if (codeLanguage === "mermaid") {
-        const styled = line
-          .replace(/-->|->|→/g, `${c.amberBright}──▶${c.reset}`)
-          .replace(/\["?(.*?)"?\]/g, `${c.cyanBright}[$1]${c.reset}`);
-        formatted.push(`  ${c.muted}│${c.reset}   ${styled}`);
+        mermaidBuffer.push(line);
       } else {
         formatted.push(
           `  ${c.muted}│${c.reset}   ${c.cyanBright}${line}${c.reset}`,
@@ -176,6 +223,15 @@ export function renderMarkdown(raw: string): string {
     }
 
     formatted.push(formatInline(line));
+  }
+
+  // Handle unclosed code block at EOF
+  if (inCodeBlock) {
+    if (codeLanguage === "mermaid" && mermaidBuffer.length > 0) {
+      formatted.push(renderMermaidDiagram(mermaidBuffer.join("\n")));
+    } else {
+      formatted.push(`${c.muted}  └${"─".repeat(50)}${c.reset}\n`);
+    }
   }
 
   return formatted.join("\n");

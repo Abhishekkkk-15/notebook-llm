@@ -1,5 +1,7 @@
+import fs from "fs";
 import path from "path";
 import * as p from "@clack/prompts";
+import terminalImage from "terminal-image";
 import { RAGPipeline } from "../service/rag_pipeline.js";
 import type { IProjectDoc } from "../lib/db/project.model.js";
 import { pickPdfFile } from "./file_picker.js";
@@ -7,6 +9,7 @@ import {
   printAnswerCard,
   renderMarkdown,
   renderChunkWithImages,
+  renderMermaidDiagram,
   openImageInSystemViewer,
   c,
 } from "./markdown.js";
@@ -85,6 +88,16 @@ export class InteractiveTUI {
           hint: "Search chunks by similarity score",
         },
         {
+          value: "GALLERY",
+          label: "📸  Book Image & Diagram Gallery",
+          hint: "Browse extracted figures & flowcharts with 4K viewer",
+        },
+        {
+          value: "READER",
+          label: "📑  Table of Contents & Section Reader",
+          hint: "Browse chapters and read full parent sections",
+        },
+        {
           value: "OPEN",
           label: "📂  Open Existing Project",
           hint: "Switch to another ingested PDF project",
@@ -127,6 +140,12 @@ export class InteractiveTUI {
         break;
       case "SEARCH":
         await this.handleSearchFlow();
+        break;
+      case "GALLERY":
+        await this.handleGalleryFlow();
+        break;
+      case "READER":
+        await this.handleSectionReaderFlow();
         break;
       case "OPEN":
         await this.handleOpenProject();
@@ -373,6 +392,492 @@ export class InteractiveTUI {
         await this.pressEnterToContinue("Press Enter to return to chunk list...");
       }
       console.clear();
+    }
+  }
+
+  /**
+   * Interactive Visual Gallery: Browse all diagrams, figures, and charts in the book
+   */
+  private async handleGalleryFlow(): Promise<void> {
+    if (!this.activeProject) {
+      p.log.warn("Please select or create a project first.");
+      await this.handleOpenProject();
+      if (!this.activeProject) return;
+    }
+
+    const s = p.spinner();
+    s.start(`Loading visuals & diagrams from "${this.activeProject.name}"...`);
+
+    let parents: any[] = [];
+    try {
+      parents = await this.ragPipeline.getProjectParents(
+        this.activeProject.projectId,
+      );
+      s.stop(`Loaded ${parents.length} sections`);
+    } catch (err: any) {
+      s.stop("Failed to load project sections");
+      p.log.error(err.message || String(err));
+      await this.pressEnterToContinue();
+      return;
+    }
+
+    interface IGalleryItem {
+      id: string;
+      type: "image" | "mermaid";
+      title: string;
+      caption?: string;
+      breadcrumb: string;
+      chapterNumber?: number;
+      chapterTitle?: string;
+      page?: number;
+      imagePath?: string;
+      mermaidCode?: string;
+      parentText: string;
+    }
+
+    const galleryItems: IGalleryItem[] = [];
+    const seenImagePaths = new Set<string>();
+
+    for (const parent of parents) {
+      // 1. Collect images from metadata.images
+      if (Array.isArray(parent.metadata?.images)) {
+        for (const img of parent.metadata.images) {
+          const imgPath = img.relativePath || img.url;
+          if (imgPath && !seenImagePaths.has(imgPath)) {
+            seenImagePaths.add(imgPath);
+            galleryItems.push({
+              id: `img_${galleryItems.length + 1}`,
+              type: "image",
+              title: img.caption || img.fileName || "Figure",
+              caption: img.caption,
+              breadcrumb: parent.metadata?.breadcrumb || parent.chunkId,
+              chapterNumber: parent.metadata?.chapterNumber,
+              chapterTitle: parent.metadata?.chapterTitle,
+              page: img.pageNum,
+              imagePath: imgPath,
+              parentText: parent.text,
+            });
+          }
+        }
+      }
+
+      // 2. Collect any markdown image tags in parent text
+      const mdImgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+      let imgMatch: RegExpExecArray | null;
+      while ((imgMatch = mdImgRegex.exec(parent.text)) !== null) {
+        const caption = imgMatch[1] || "Figure";
+        const imgPath = imgMatch[2]!;
+        if (!seenImagePaths.has(imgPath)) {
+          seenImagePaths.add(imgPath);
+          galleryItems.push({
+            id: `img_${galleryItems.length + 1}`,
+            type: "image",
+            title: caption,
+            caption,
+            breadcrumb: parent.metadata?.breadcrumb || parent.chunkId,
+            chapterNumber: parent.metadata?.chapterNumber,
+            chapterTitle: parent.metadata?.chapterTitle,
+            imagePath: imgPath,
+            parentText: parent.text,
+          });
+        }
+      }
+
+      // 3. Collect Mermaid diagrams
+      const mermaidRegex = /```(?:mermaid|flowchart|graph)\s*([\s\S]*?)```/gi;
+      let mmMatch: RegExpExecArray | null;
+      let diagIndex = 1;
+      while ((mmMatch = mermaidRegex.exec(parent.text)) !== null) {
+        const mermaidCode = mmMatch[1]!.trim();
+        const firstNodeMatch = mermaidCode.match(/\["?(.*?)"?\]/);
+        const diagTitle = firstNodeMatch
+          ? `Flowchart: ${firstNodeMatch[1]?.slice(0, 45)}`
+          : `Process Flowchart ${diagIndex++}`;
+
+        galleryItems.push({
+          id: `diag_${galleryItems.length + 1}`,
+          type: "mermaid",
+          title: diagTitle,
+          breadcrumb: parent.metadata?.breadcrumb || parent.chunkId,
+          chapterNumber: parent.metadata?.chapterNumber,
+          chapterTitle: parent.metadata?.chapterTitle,
+          mermaidCode,
+          parentText: parent.text,
+        });
+      }
+    }
+
+    if (galleryItems.length === 0) {
+      p.log.warn("No extracted images or diagrams found in this project.");
+      await this.pressEnterToContinue();
+      return;
+    }
+
+    let currentFilter: "ALL" | "IMAGE" | "MERMAID" = "ALL";
+
+    while (true) {
+      console.clear();
+      const termWidth = Math.max(40, (process.stdout.columns || 80) - 2);
+      console.log(
+        `\x1b[36m╭─ 📸 Book Visual & Diagram Gallery: \x1b[1m\x1b[33m${this.activeProject.name}\x1b[0m`,
+      );
+      console.log(
+        `\x1b[36m│\x1b[0m  \x1b[90mBrowse extracted figures, screenshots, and Mermaid flowcharts.\x1b[0m`,
+      );
+      console.log(`\x1b[36m╰${"─".repeat(termWidth)}\x1b[0m\n`);
+
+      const filtered = galleryItems.filter((item) => {
+        if (currentFilter === "IMAGE") return item.type === "image";
+        if (currentFilter === "MERMAID") return item.type === "mermaid";
+        return true;
+      });
+
+      const imgCount = galleryItems.filter((g) => g.type === "image").length;
+      const diagCount = galleryItems.filter((g) => g.type === "mermaid").length;
+
+      const filterLabel =
+        currentFilter === "ALL"
+          ? `Showing All (${filtered.length})`
+          : currentFilter === "IMAGE"
+            ? `Showing Images & Figures (${filtered.length})`
+            : `Showing Mermaid Diagrams (${filtered.length})`;
+
+      const options = [
+        {
+          value: "exit",
+          label: "⬅️  Return to Main Menu",
+          hint: "Exit gallery",
+        },
+        {
+          value: "FILTER",
+          label: `🔍  Change Filter [${filterLabel}]`,
+          hint: `Images: ${imgCount} • Diagrams: ${diagCount}`,
+        },
+        ...filtered.map((item, idx) => {
+          const typeIcon = item.type === "image" ? "🖼️ " : "📊 ";
+          const locHint = item.page
+            ? `Page ${item.page}${item.chapterNumber ? ` • Ch ${item.chapterNumber}` : ""}`
+            : item.chapterNumber
+              ? `Chapter ${item.chapterNumber}`
+              : item.breadcrumb.split(">").pop()?.trim() || "";
+          return {
+            value: String(idx),
+            label: `${typeIcon}[${idx + 1}] ${item.title.length > 55 ? item.title.slice(0, 52) + "..." : item.title}`,
+            hint: locHint,
+          };
+        }),
+      ];
+
+      const selected = await p.select({
+        message: "Select an image or diagram to view:",
+        options,
+      });
+
+      if (p.isCancel(selected) || selected === "exit") {
+        break;
+      }
+
+      if (selected === "FILTER") {
+        const nextFilter = await p.select({
+          message: "Select view filter:",
+          options: [
+            {
+              value: "ALL",
+              label: `🌟  All Visuals (${galleryItems.length})`,
+            },
+            {
+              value: "IMAGE",
+              label: `🖼️   Extracted Figures & Screenshots (${imgCount})`,
+            },
+            {
+              value: "MERMAID",
+              label: `📊  Mermaid Flowcharts & Diagrams (${diagCount})`,
+            },
+          ],
+        });
+        if (!p.isCancel(nextFilter)) {
+          currentFilter = nextFilter as any;
+        }
+        continue;
+      }
+
+      const item = filtered[Number(selected)];
+      if (!item) continue;
+
+      // Item viewing loop
+      while (true) {
+        console.clear();
+        console.log(`\x1b[36m╭─ \x1b[1m\x1b[33m${item.title}\x1b[0m`);
+        console.log(
+          `\x1b[36m│\x1b[0m  \x1b[90mSection: ${item.breadcrumb}${item.page ? ` • Page: ${item.page}` : ""}\x1b[0m`,
+        );
+        console.log(`\x1b[36m╰${"─".repeat(termWidth)}\x1b[0m\n`);
+
+        if (item.type === "image" && item.imagePath) {
+          const resolvedPath = path.isAbsolute(item.imagePath)
+            ? item.imagePath
+            : path.resolve(process.cwd(), item.imagePath);
+
+          if (fs.existsSync(resolvedPath)) {
+            try {
+              const imgWidth = Math.min(termWidth - 8, 120);
+              const renderedImg = await terminalImage.file(resolvedPath, {
+                width: imgWidth,
+                preferNativeRender: false,
+              });
+              if (renderedImg) {
+                console.log(renderedImg);
+              }
+            } catch (err: any) {
+              p.log.warn(`Image preview error: ${err.message}`);
+            }
+          } else {
+            p.log.warn(`Image file not found on disk: ${resolvedPath}`);
+          }
+        } else if (item.type === "mermaid" && item.mermaidCode) {
+          console.log(renderMermaidDiagram(item.mermaidCode));
+        }
+
+        console.log(`\x1b[90m${"─".repeat(termWidth)}\x1b[0m\n`);
+
+        const actionOptions = [
+          { value: "back", label: "⬅️  Return to Gallery List", hint: "Back" },
+        ];
+
+        if (item.type === "image" && item.imagePath) {
+          actionOptions.push({
+            value: "open_system",
+            label: "🖼️  Open in OS 4K Viewer (Full Clarity)",
+            hint: path.basename(item.imagePath),
+          });
+        }
+
+        actionOptions.push({
+          value: "view_section",
+          label: "📖 View Complete Containing Section Text",
+          hint: item.breadcrumb,
+        });
+
+        const action = await p.select({
+          message: "Actions:",
+          options: actionOptions,
+        });
+
+        if (p.isCancel(action) || action === "back") {
+          break;
+        }
+
+        if (action === "open_system" && item.imagePath) {
+          openImageInSystemViewer(item.imagePath);
+          p.log.success(
+            `Opened ${path.basename(item.imagePath)} in system image viewer!`,
+          );
+          await this.pressEnterToContinue("Press Enter to continue...");
+        } else if (action === "view_section") {
+          console.clear();
+          console.log(
+            `\x1b[36m╭─ 📖 Containing Section: \x1b[1m\x1b[33m${item.breadcrumb}\x1b[0m`,
+          );
+          console.log(`\x1b[36m╰${"─".repeat(termWidth)}\x1b[0m\n`);
+          await renderChunkWithImages(item.parentText);
+          console.log(`\x1b[90m${"─".repeat(termWidth)}\x1b[0m\n`);
+          await this.pressEnterToContinue("Press Enter to return to visual...");
+        }
+      }
+    }
+  }
+
+  /**
+   * Interactive Table of Contents & Section Reader:
+   * Browse the book's sections & chapters and read full parent chunks with tables and figures.
+   */
+  private async handleSectionReaderFlow(): Promise<void> {
+    if (!this.activeProject) {
+      p.log.warn("Please select or create a project first.");
+      await this.handleOpenProject();
+      if (!this.activeProject) return;
+    }
+
+    const s = p.spinner();
+    s.start(`Loading Table of Contents for "${this.activeProject.name}"...`);
+
+    let parents: any[] = [];
+    try {
+      parents = await this.ragPipeline.getProjectParents(
+        this.activeProject.projectId,
+      );
+      s.stop(`Loaded ${parents.length} sections`);
+    } catch (err: any) {
+      s.stop("Failed to load project sections");
+      p.log.error(err.message || String(err));
+      await this.pressEnterToContinue();
+      return;
+    }
+
+    if (parents.length === 0) {
+      p.log.warn("No sections found in this project.");
+      await this.pressEnterToContinue();
+      return;
+    }
+
+    let currentIndex = 0;
+
+    while (true) {
+      console.clear();
+      const termWidth = Math.max(40, (process.stdout.columns || 80) - 2);
+      console.log(
+        `\x1b[36m╭─ 📑 Table of Contents: \x1b[1m\x1b[33m${this.activeProject.name}\x1b[0m`,
+      );
+      console.log(
+        `\x1b[36m│\x1b[0m  \x1b[90mSelect a chapter or section to read in full.\x1b[0m`,
+      );
+      console.log(`\x1b[36m╰${"─".repeat(termWidth)}\x1b[0m\n`);
+
+      const options = [
+        {
+          value: "exit",
+          label: "⬅️  Return to Main Menu",
+          hint: "Exit reader",
+        },
+        ...parents.map((parent, idx) => {
+          const chNum = parent.metadata?.chapterNumber;
+          const chPrefix = chNum ? `[Ch ${chNum}] ` : "";
+          const title =
+            parent.metadata?.subtopicTitle ||
+            parent.metadata?.chapterTitle ||
+            parent.metadata?.breadcrumb ||
+            parent.chunkId;
+          const imgCount =
+            parent.metadata?.imageUrls?.length ||
+            parent.metadata?.images?.length ||
+            0;
+          const hasDiag =
+            parent.metadata?.hasDiagrams || parent.text.includes("```mermaid");
+          const badges = [
+            `${parent.tokenCount} tokens`,
+            imgCount > 0 ? `📸 ${imgCount} img` : null,
+            hasDiag ? `📊 diag` : null,
+          ]
+            .filter(Boolean)
+            .join(" • ");
+
+          return {
+            value: String(idx),
+            label: `${chPrefix}${title.length > 55 ? title.slice(0, 52) + "..." : title}`,
+            hint: badges,
+          };
+        }),
+      ];
+
+      const selected = await p.select({
+        message: "Choose a section to read:",
+        options,
+      });
+
+      if (p.isCancel(selected) || selected === "exit") {
+        break;
+      }
+
+      currentIndex = Number(selected);
+
+      // Section reader loop (supports Next / Previous navigation!)
+      while (true) {
+        const currentParent = parents[currentIndex];
+        if (!currentParent) break;
+
+        console.clear();
+        console.log(
+          `\x1b[36m╭─ 📑 [${currentIndex + 1}/${parents.length}] \x1b[1m\x1b[33m${currentParent.metadata?.breadcrumb || currentParent.chunkId}\x1b[0m`,
+        );
+        console.log(
+          `\x1b[36m│\x1b[0m  \x1b[90mChapter: ${currentParent.metadata?.chapterTitle || currentParent.metadata?.chapterNumber || "General"} • Length: ${currentParent.tokenCount} tokens\x1b[0m`,
+        );
+        console.log(`\x1b[36m╰${"─".repeat(termWidth)}\x1b[0m\n`);
+
+        await renderChunkWithImages(currentParent.text);
+
+        console.log(`\x1b[90m${"─".repeat(termWidth)}\x1b[0m\n`);
+
+        const readerActions: Array<{
+          value: string;
+          label: string;
+          hint?: string;
+        }> = [];
+
+        if (currentIndex + 1 < parents.length) {
+          readerActions.push({
+            value: "next",
+            label: "➡️  Next Section",
+            hint:
+              parents[currentIndex + 1]?.metadata?.subtopicTitle || "Next",
+          });
+        }
+
+        if (currentIndex > 0) {
+          readerActions.push({
+            value: "prev",
+            label: "⬅️  Previous Section",
+            hint:
+              parents[currentIndex - 1]?.metadata?.subtopicTitle || "Previous",
+          });
+        }
+
+        const chunkImages = currentParent.metadata?.imageUrls || [];
+        chunkImages.forEach((img: string, i: number) => {
+          readerActions.push({
+            value: `open_img_${i}`,
+            label: `🖼️  Open Image ${i + 1} in 4K Viewer`,
+            hint: path.basename(img),
+          });
+        });
+
+        readerActions.push({
+          value: "toc",
+          label: "📑 Back to Table of Contents",
+          hint: "Pick another section",
+        });
+
+        readerActions.push({
+          value: "menu",
+          label: "🚪 Return to Main Menu",
+          hint: "Exit reader",
+        });
+
+        const action = await p.select({
+          message: "Reader Navigation:",
+          options: readerActions,
+        });
+
+        if (p.isCancel(action) || action === "toc") {
+          break;
+        }
+
+        if (action === "menu") {
+          return;
+        }
+
+        if (action === "next") {
+          currentIndex++;
+          continue;
+        }
+
+        if (action === "prev") {
+          currentIndex--;
+          continue;
+        }
+
+        if (typeof action === "string" && action.startsWith("open_img_")) {
+          const imgIndex = Number(action.replace("open_img_", ""));
+          const targetImg = chunkImages[imgIndex];
+          if (targetImg) {
+            openImageInSystemViewer(targetImg);
+            p.log.success(
+              `Opened ${path.basename(targetImg)} in system image viewer!`,
+            );
+            await this.pressEnterToContinue();
+          }
+        }
+      }
     }
   }
 

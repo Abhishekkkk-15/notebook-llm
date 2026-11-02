@@ -78,6 +78,13 @@ export class RAGPipeline {
     return await this.projectStore.getProject(projectId);
   }
 
+  /**
+   * Retrieves all parent chunks belonging to a specific project.
+   */
+  async getProjectParents(projectId: string): Promise<IParentChunkDoc[]> {
+    return await this.parentStore.getParentsByProject(projectId);
+  }
+
   async deleteProject(projectId: string, namespace?: string): Promise<boolean> {
     await Promise.all([
       this.parentStore.deleteParentsByProject(projectId),
