@@ -96,7 +96,12 @@ export class InteractiveTUI {
         {
           value: "DELETE",
           label: "🗑️   Delete a Project",
-          hint: "Remove project from MongoDB and Pinecone",
+          hint: "Remove a single project from MongoDB and Pinecone",
+        },
+        {
+          value: "RESET_ALL",
+          label: "🔥  Delete ALL Data (MongoDB & Pinecone)",
+          hint: "Completely wipe all projects, chunks, and Pinecone vectors",
         },
         {
           value: "EXIT",
@@ -128,6 +133,9 @@ export class InteractiveTUI {
         break;
       case "DELETE":
         await this.handleDeleteProject();
+        break;
+      case "RESET_ALL":
+        await this.handleResetAllData();
         break;
     }
   }
@@ -439,6 +447,80 @@ export class InteractiveTUI {
     } catch (err: any) {
       s.stop("Deletion failed");
       p.log.error(`Error deleting project: ${err.message || String(err)}`);
+      await this.pressEnterToContinue();
+    }
+  }
+
+  /**
+   * Reset / delete ALL data from MongoDB and Pinecone
+   */
+  private async handleResetAllData(): Promise<void> {
+    console.clear();
+    p.log.warn("\x1b[31m\x1b[1m⚠️   DANGER ZONE: DELETE ALL DATA ⚠️\x1b[0m");
+    console.log(
+      "\x1b[90mThis will permanently wipe:\n" +
+        "  • All projects from MongoDB\n" +
+        "  • All parent sections from MongoDB\n" +
+        "  • All vector embeddings from Pinecone\n" +
+        "  • All locally extracted images\x1b[0m\n",
+    );
+
+    const confirm = await p.confirm({
+      message:
+        "Are you ABSOLUTELY sure you want to delete ALL data from DB and Pinecone?",
+      initialValue: false,
+    });
+
+    if (p.isCancel(confirm) || !confirm) {
+      p.log.info("Reset cancelled. No data was deleted.");
+      await this.pressEnterToContinue();
+      return;
+    }
+
+    // Safety confirmation text
+    const doubleConfirm = await p.text({
+      message: "Type 'DELETE ALL' to confirm permanent wipe:",
+      placeholder: "DELETE ALL",
+      validate: (val) => {
+        if (val !== "DELETE ALL") {
+          return "You must type 'DELETE ALL' exactly (or Ctrl+C to cancel)";
+        }
+      },
+    });
+
+    if (p.isCancel(doubleConfirm) || doubleConfirm !== "DELETE ALL") {
+      p.log.info("Reset cancelled.");
+      await this.pressEnterToContinue();
+      return;
+    }
+
+    const s = p.spinner();
+    s.start("Wiping all data from MongoDB and Pinecone...");
+
+    try {
+      const result = await this.ragPipeline.resetAllData({
+        deleteLocalImages: true,
+        onProgress: (msg) => s.message(msg),
+      });
+
+      this.activeProject = null;
+      s.stop("All databases wiped successfully");
+
+      console.log(`\n\x1b[32m✔ Reset Summary:\x1b[0m`);
+      console.log(`  • Deleted Projects:      ${result.deletedProjects}`);
+      console.log(`  • Deleted Parent Chunks: ${result.deletedParents}`);
+      console.log(
+        `  • Pinecone Cleared:      ${result.pineconeCleared ? "Yes" : "Failed"}`,
+      );
+      if (result.imagesDeleted !== undefined) {
+        console.log(`  • Image Dirs Cleaned:    ${result.imagesDeleted}`);
+      }
+      console.log();
+
+      await this.pressEnterToContinue("Press Enter to return to main menu...");
+    } catch (err: any) {
+      s.stop("Reset operation failed");
+      p.log.error(`Error deleting database data: ${err.message || String(err)}`);
       await this.pressEnterToContinue();
     }
   }

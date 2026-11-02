@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsc && node dist/index.js",
     "cli": "tsx src/index.ts",
-    "inspect": "tsx src/inspect.ts"
+    "inspect": "tsx src/inspect.ts",
+    "reset:db": "tsx src/scripts/reset_db.ts"
   },
   "keywords": [],
   "author": "",

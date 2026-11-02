@@ -45,6 +45,12 @@ export class MongoProjectStore {
     const res = await ProjectModel.deleteOne({ projectId });
     return res.deletedCount > 0;
   }
+
+  async deleteAllProjects(): Promise<number> {
+    await this.ensureConnected();
+    const res = await ProjectModel.deleteMany({});
+    return res.deletedCount;
+  }
 }
 
 export const mongoProjectStore = new MongoProjectStore();

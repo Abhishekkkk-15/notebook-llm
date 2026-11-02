@@ -181,6 +181,15 @@ export class MongoParentStore {
   }
 
   /**
+   * Delete ALL parent chunks from MongoDB.
+   */
+  async deleteAllParents(): Promise<number> {
+    await this.ensureConnected();
+    const res = await ParentChunkModel.deleteMany({});
+    return res.deletedCount;
+  }
+
+  /**
    * Get the total count of parent chunks stored.
    */
   async countParents(filter?: Record<string, any>): Promise<number> {

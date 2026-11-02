@@ -131,4 +131,29 @@ export class PinconeStore {
     const ns = this.index.namespace(namespace ?? this.defaultNamespace);
     await ns.deleteAll();
   }
+
+  /**
+   * Wipe all vectors across all namespaces (or specific namespace)
+   */
+  async deleteAllVectors(namespace?: string): Promise<void> {
+    if (namespace) {
+      const ns = this.index.namespace(namespace);
+      await ns.deleteAll();
+      return;
+    }
+
+    try {
+      const stats = await this.index.describeIndexStats();
+      const namespaces = Object.keys(stats.namespaces || {});
+      if (namespaces.length === 0) {
+        await this.index.namespace(this.defaultNamespace).deleteAll();
+      } else {
+        await Promise.all(
+          namespaces.map((ns) => this.index.namespace(ns).deleteAll()),
+        );
+      }
+    } catch {
+      await this.index.namespace(this.defaultNamespace).deleteAll();
+    }
+  }
 }

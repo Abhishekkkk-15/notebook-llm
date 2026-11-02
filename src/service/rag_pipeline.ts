@@ -87,6 +87,63 @@ export class RAGPipeline {
     return true;
   }
 
+  /**
+   * Completely reset and wipe all data across:
+   * - MongoDB Parent chunks
+   * - MongoDB Projects
+   * - Pinecone vector chunks (all namespaces)
+   * - Local extracted images directory (optional, default true)
+   */
+  async resetAllData(options?: {
+    namespace?: string;
+    deleteLocalImages?: boolean;
+    onProgress?: (message: string) => void;
+  }): Promise<{
+    deletedParents: number;
+    deletedProjects: number;
+    pineconeCleared: boolean;
+    imagesDeleted?: number;
+  }> {
+    options?.onProgress?.("Deleting all vector chunks from Pinecone...");
+    let pineconeCleared = false;
+    try {
+      await this.pcStore.deleteAllVectors(options?.namespace);
+      pineconeCleared = true;
+    } catch (err: any) {
+      console.warn("[RAGPipeline] Warning while clearing Pinecone vectors:", err?.message || err);
+    }
+
+    options?.onProgress?.("Deleting all parent sections from MongoDB...");
+    const deletedParents = await this.parentStore.deleteAllParents();
+
+    options?.onProgress?.("Deleting all projects from MongoDB...");
+    const deletedProjects = await this.projectStore.deleteAllProjects();
+
+    let imagesDeleted: number | undefined;
+    if (options?.deleteLocalImages !== false) {
+      options?.onProgress?.("Cleaning up extracted local image files...");
+      const imagesDir = path.resolve("./extracted_images");
+      if (fs.existsSync(imagesDir)) {
+        try {
+          const files = fs.readdirSync(imagesDir);
+          imagesDeleted = files.length;
+          fs.rmSync(imagesDir, { recursive: true, force: true });
+          fs.mkdirSync(imagesDir, { recursive: true });
+        } catch (err: any) {
+          console.warn("[RAGPipeline] Warning cleaning extracted_images:", err?.message || err);
+        }
+      }
+    }
+
+    options?.onProgress?.("Database and vector store reset complete.");
+    return {
+      deletedParents,
+      deletedProjects,
+      pineconeCleared,
+      imagesDeleted,
+    };
+  }
+
   async ingestDocument(option: IIngestOption) {
     const namespace = option.namespace ?? "child_chunks";
     const childTokenSize = option.childTokenSize ?? 350;
