@@ -1,5 +1,7 @@
 import fs from "fs";
 import path from "path";
+import zlib from "zlib";
+import crypto from "crypto";
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 
 export interface FormattedSection {
@@ -19,6 +21,219 @@ export interface FormattedBook {
 
 export interface PdfReaderOptions {
   bookTitle?: string;
+  imageOutputDir?: string;
+  extractImages?: boolean;
+}
+
+export interface ExtractedImage {
+  id: string;
+  pageNum: number;
+  fileName: string;
+  relativePath: string;
+  width: number;
+  height: number;
+  hash: string;
+}
+
+// ==========================================
+// 1. Pure Node.js PNG Encoder (Zero Dependencies)
+// ==========================================
+const crcTable = new Uint32Array(256);
+for (let n = 0; n < 256; n++) {
+  let c = n;
+  for (let k = 0; k < 8; k++) {
+    c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  }
+  crcTable[n] = c >>> 0;
+}
+
+function crc32(buf: Buffer): number {
+  let crc = 0xffffffff;
+  for (let i = 0; i < buf.length; i++) {
+    crc = (crc >>> 8) ^ crcTable[(crc ^ buf[i]!) & 0xff]!;
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function makePngChunk(type: string, chunkData: Buffer): Buffer {
+  const len = chunkData.length;
+  const buf = Buffer.alloc(12 + len);
+  buf.writeUInt32BE(len, 0);
+  buf.write(type, 4, 4, "ascii");
+  chunkData.copy(buf, 8);
+
+  const crcBuf = Buffer.alloc(4 + len);
+  crcBuf.write(type, 0, 4, "ascii");
+  chunkData.copy(crcBuf, 4);
+  const crc = crc32(crcBuf);
+  buf.writeUInt32BE(crc, 8 + len);
+  return buf;
+}
+
+export function encodeRawToPng(
+  width: number,
+  height: number,
+  data: Uint8Array | Uint8ClampedArray,
+  channels: 3 | 4 = 4,
+): Buffer {
+  const lineLength = width * channels;
+  const rawScanlines = Buffer.alloc(height * (lineLength + 1));
+
+  let srcOffset = 0;
+  let dstOffset = 0;
+
+  for (let y = 0; y < height; y++) {
+    rawScanlines[dstOffset++] = 0; // Filter byte 0 (None)
+    for (let x = 0; x < lineLength; x++) {
+      rawScanlines[dstOffset++] = data[srcOffset++] ?? 0;
+    }
+  }
+
+  const compressed = zlib.deflateSync(rawScanlines);
+  const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+
+  const ihdrData = Buffer.alloc(13);
+  ihdrData.writeUInt32BE(width, 0);
+  ihdrData.writeUInt32BE(height, 4);
+  ihdrData[8] = 8;
+  ihdrData[9] = channels === 4 ? 6 : 2;
+  ihdrData[10] = 0;
+  ihdrData[11] = 0;
+  ihdrData[12] = 0;
+  const ihdrChunk = makePngChunk("IHDR", ihdrData);
+
+  const idatChunk = makePngChunk("IDAT", compressed);
+  const iendChunk = makePngChunk("IEND", Buffer.alloc(0));
+
+  return Buffer.concat([signature, ihdrChunk, idatChunk, iendChunk]);
+}
+
+/**
+ * Extracts embedded raster images from a PDF page and writes deduplicated PNG files to disk.
+ */
+async function extractPageImages(
+  page: any,
+  pNum: number,
+  pdfBaseName: string,
+  outputDir: string,
+  savedHashes: Map<string, string>,
+): Promise<ExtractedImage[]> {
+  const ops = await page.getOperatorList();
+  const images: ExtractedImage[] = [];
+
+  for (let i = 0; i < ops.fnArray.length; i++) {
+    const fn = ops.fnArray[i];
+    if (
+      fn === pdfjsLib.OPS.paintImageXObject ||
+      fn === pdfjsLib.OPS.paintInlineImageXObject
+    ) {
+      const imgName = ops.argsArray[i][0];
+      const pool =
+        typeof imgName === "string" && imgName.startsWith("g_")
+          ? page.commonObjs
+          : page.objs;
+
+      await new Promise<void>((resolve) => {
+        pool.get(imgName, (img: any) => {
+          if (img && img.width > 25 && img.height > 25 && img.data) {
+            const sampleBytes = img.data.slice(0, Math.min(img.data.length, 2048));
+            const hash = crypto
+              .createHash("md5")
+              .update(`${img.width}x${img.height}_`)
+              .update(sampleBytes)
+              .digest("hex");
+
+            let relPath = savedHashes.get(hash);
+            if (!relPath) {
+              const fileName = `${pdfBaseName}_p${pNum}_${imgName}.png`.replace(
+                /[^a-zA-Z0-9._-]/g,
+                "_",
+              );
+              const fullPath = path.join(outputDir, fileName);
+              const channels =
+                img.data.length === img.width * img.height * 4 ? 4 : 3;
+              const pngBuf = encodeRawToPng(
+                img.width,
+                img.height,
+                img.data,
+                channels,
+              );
+              fs.writeFileSync(fullPath, pngBuf);
+              relPath = path.relative(process.cwd(), fullPath).replace(/\\/g, "/");
+              if (!relPath.startsWith(".")) relPath = `./${relPath}`;
+              savedHashes.set(hash, relPath);
+            }
+
+            images.push({
+              id: imgName,
+              pageNum: pNum,
+              fileName: path.basename(relPath),
+              relativePath: relPath,
+              width: img.width,
+              height: img.height,
+              hash,
+            });
+          }
+          resolve();
+        });
+      });
+    }
+  }
+
+  return images;
+}
+
+// ==========================================
+// 2. Flowchart to Mermaid Converter
+// ==========================================
+function isFlowchartCandidate(text: string): boolean {
+  const arrowRegex = /\s*(?:→|-->|->|⇒|~>)\s*/;
+  if (!arrowRegex.test(text)) return false;
+
+  // Exclude currency rate listings e.g. EUR → USD: 2,282,608.70
+  if (/\b(?:USD|EUR|GBP|INR|JPY|CAD|AUD|CNY)\b.+:\s*[\d,.]+/i.test(text)) {
+    return false;
+  }
+
+  // Exclude code declarations
+  if (/^(?:const|let|var|import|return|function)\b/.test(text.trim())) {
+    return false;
+  }
+
+  const parts = text.split(arrowRegex).map((s) => s.trim()).filter(Boolean);
+  if (parts.length < 2) return false;
+
+  if (parts.length === 2) {
+    if (parts[0]!.length < 3 || parts[1]!.length < 3) return false;
+  }
+
+  return true;
+}
+
+export function convertFlowToMermaid(rawText: string): string | null {
+  if (!isFlowchartCandidate(rawText)) return null;
+
+  const arrowRegex = /\s*(?:→|-->|->|⇒|~>)\s*/;
+  const rawSteps = rawText
+    .split(arrowRegex)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const sanitizeLabel = (txt: string) => {
+    return txt.replace(/["\\]/g, "").replace(/\n/g, " ").trim();
+  };
+
+  const lines: string[] = ["```mermaid", "flowchart LR"];
+  for (let i = 0; i < rawSteps.length - 1; i++) {
+    const fromId = `Step${i + 1}`;
+    const toId = `Step${i + 2}`;
+    const fromLabel = sanitizeLabel(rawSteps[i]!);
+    const toLabel = sanitizeLabel(rawSteps[i + 1]!);
+    lines.push(`    ${fromId}["${fromLabel}"] --> ${toId}["${toLabel}"]`);
+  }
+  lines.push("```");
+
+  return lines.join("\n");
 }
 
 interface RawPage {
@@ -564,6 +779,10 @@ function parsePageLayoutAndTables(
   pageHeight: number = 792,
   pageWidth: number = 612,
   carriedHeader?: string[],
+  pageImages: ExtractedImage[] = [],
+  seenHeaderHashes: Set<string> = new Set(),
+  pageNum: number = 1,
+  pdfBaseName: string = "document",
 ): { text: string; carriedCaption: string; carriedHeader?: string[] } {
   // 1. Group items into visual lines by matching Y coordinates
   items.sort((a, b) => (Math.abs(b.y - a.y) > 2.5 ? b.y - a.y : a.x - b.x));
@@ -589,6 +808,20 @@ function parsePageLayoutAndTables(
   const tableCaptionRegex =
     /^(Table\s+\d+[\-\.:]\d*|\bTable\b)\s*[:\-\.]?\s*(.+)?/i;
 
+  const claimedImageIds = new Set<string>();
+
+  // Document / Page Header Banner (e.g. university letterhead or book top logo)
+  for (const img of pageImages) {
+    const isBanner = img.width > 800 && img.height < 350;
+    if (isBanner) {
+      if (!seenHeaderHashes.has(img.hash)) {
+        seenHeaderHashes.add(img.hash);
+        outputBlocks.push(`![${pdfBaseName} Header](${img.relativePath})`);
+      }
+      claimedImageIds.add(img.id);
+    }
+  }
+
   let i = 0;
   while (i < rawLines.length) {
     const line = rawLines[i]!;
@@ -611,14 +844,32 @@ function parsePageLayoutAndTables(
       continue;
     }
 
-    // 3. Figure Caption Detection (Vector diagrams / Figures)
+    // 3. Figure Caption Detection (Vector diagrams / Figures / Images)
     if (isFigureCaptionLine(line)) {
-      outputBlocks.push(`\n**${line.rawText}**\n`);
+      const unclaimedImg = pageImages.find((img) => !claimedImageIds.has(img.id));
+      if (unclaimedImg) {
+        outputBlocks.push(
+          `![${line.rawText}](${unclaimedImg.relativePath})\n\n**${line.rawText}**`,
+        );
+        claimedImageIds.add(unclaimedImg.id);
+      } else {
+        outputBlocks.push(`\n**${line.rawText}**\n`);
+      }
       i++;
       continue;
     }
 
-    // 4. Heading Detection (passes pageWidth to verify margin/centering)
+    // 4. Standalone Vector Diagram / Process Flow (Mermaid flowchart)
+    if (isFlowchartCandidate(line.rawText)) {
+      const mermaid = convertFlowToMermaid(line.rawText);
+      if (mermaid) {
+        outputBlocks.push(mermaid);
+        i++;
+        continue;
+      }
+    }
+
+    // 5. Heading Detection (passes pageWidth to verify margin/centering)
     const prevLine = i > 0 ? rawLines[i - 1] : undefined;
     const nextLine = i + 1 < rawLines.length ? rawLines[i + 1] : undefined;
     if (isHeadingLine(line, prevLine, nextLine, pageWidth)) {
@@ -627,7 +878,7 @@ function parsePageLayoutAndTables(
       continue;
     }
 
-    // 5. Bullet / List Item (NOT a table)
+    // 6. Bullet / List Item (NOT a table)
     if (isBulletOrListLine(line)) {
       const first = line.cells[0]!.str;
       const rest = line.cells
@@ -639,7 +890,7 @@ function parsePageLayoutAndTables(
       continue;
     }
 
-    // 6. Check for Table Block
+    // 7. Check for Table Block
     // Starts if line has >= 2 cells OR if line is indented cell continuation of upcoming table
     const isCandidateStart =
       line.cells.length >= 2 ||
@@ -728,12 +979,39 @@ function parsePageLayoutAndTables(
             continue;
           }
         }
+      } else {
+        // If diagram or flow, check if any candidate line can be converted to Mermaid
+        const flowLine = candidateLines.find((l) =>
+          isFlowchartCandidate(l.rawText),
+        );
+        if (flowLine) {
+          const mermaid = convertFlowToMermaid(flowLine.rawText);
+          if (mermaid) {
+            outputBlocks.push(mermaid);
+            if (pendingCaption) {
+              outputBlocks.push(`**${pendingCaption}**`);
+              pendingCaption = "";
+            }
+            i = k;
+            continue;
+          }
+        }
       }
     }
 
     // Standard body line
     outputBlocks.push(line.rawText);
     i++;
+  }
+
+  // Any remaining content images on this page that were not associated with a caption
+  for (const img of pageImages) {
+    if (!claimedImageIds.has(img.id)) {
+      outputBlocks.push(
+        `![Figure (${pdfBaseName} page ${pageNum})](${img.relativePath})`,
+      );
+      claimedImageIds.add(img.id);
+    }
   }
 
   return {
@@ -746,15 +1024,43 @@ function parsePageLayoutAndTables(
 /**
  * Extracts line-separated text and Markdown-formatted tables from all pages.
  */
-async function extractRawPages(doc: any): Promise<RawPage[]> {
+async function extractRawPages(
+  doc: any,
+  pdfBaseName: string = "document",
+  options: PdfReaderOptions = {},
+): Promise<RawPage[]> {
   const pages: RawPage[] = [];
   let carriedCaption = "";
   let carriedHeader: string[] | undefined = undefined;
+
+  const assetsDir =
+    options.imageOutputDir || path.join(process.cwd(), "assets", "images");
+  if (options.extractImages !== false) {
+    fs.mkdirSync(assetsDir, { recursive: true });
+  }
+
+  const savedHashes = new Map<string, string>();
+  const seenHeaderHashes = new Set<string>();
 
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i);
     const viewport = page.getViewport({ scale: 1 });
     const textContent = await page.getTextContent();
+
+    let pageImages: ExtractedImage[] = [];
+    if (options.extractImages !== false) {
+      try {
+        pageImages = await extractPageImages(
+          page,
+          i,
+          pdfBaseName,
+          assetsDir,
+          savedHashes,
+        );
+      } catch {
+        // Non-blocking fallback if an image stream fails to decode
+      }
+    }
 
     const items: TextItem[] = [];
     for (const item of textContent.items as any[]) {
@@ -779,6 +1085,10 @@ async function extractRawPages(doc: any): Promise<RawPage[]> {
       viewport.height,
       viewport.width,
       carriedHeader,
+      pageImages,
+      seenHeaderHashes,
+      i,
+      pdfBaseName,
     );
     carriedCaption = nextCaption;
     carriedHeader = nextHeader;
@@ -874,7 +1184,7 @@ export async function readAndFormatPdf(
     disableFontFace: true,
     verbosity: 0,
   }).promise;
-  const pages = await extractRawPages(doc);
+  const pages = await extractRawPages(doc, bookTitle, options);
 
   // 1. Try reading the embedded PDF bookmark outline
   const outline = await doc.getOutline();
