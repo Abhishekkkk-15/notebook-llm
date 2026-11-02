@@ -1,9 +1,24 @@
+export interface IImageMetadata {
+  id?: string;
+  pageNum: number;
+  fileName: string;
+  relativePath: string;
+  url: string;
+  width?: number;
+  height?: number;
+  hash?: string;
+  caption?: string;
+}
+
 export type TMetadata = {
   bookTitle: string;
   chapterNumber: number;
   chapterTitle: string;
   subtopicTitle: string;
   breadcrumb: string;
+  images?: IImageMetadata[];
+  imageUrls?: string[];
+  hasDiagrams?: boolean;
 };
 
 export interface IChildChunk {

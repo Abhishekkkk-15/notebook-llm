@@ -20,6 +20,9 @@ const MetadataSchema = new Schema<TMetadata>(
     chapterTitle: { type: String, required: true },
     subtopicTitle: { type: String, required: true },
     breadcrumb: { type: String, required: true, index: true },
+    images: { type: [Schema.Types.Mixed], default: [] },
+    imageUrls: { type: [String], default: [] },
+    hasDiagrams: { type: Boolean, default: false },
   },
   { _id: false },
 );

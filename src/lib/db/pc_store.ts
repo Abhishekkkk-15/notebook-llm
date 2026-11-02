@@ -40,6 +40,9 @@ export class PinconeStore {
         chapterTitle: chunk.metadata.chapterTitle,
         subtopicTitle: chunk.metadata.subtopicTitle,
         breadcrumb: chunk.metadata.breadcrumb,
+        imageUrls: chunk.metadata.imageUrls ?? [],
+        hasImages: (chunk.metadata.imageUrls?.length ?? 0) > 0,
+        hasDiagrams: chunk.metadata.hasDiagrams ?? false,
       },
     };
   }

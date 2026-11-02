@@ -24,6 +24,20 @@ export function chunkFormattedBook(
     const parentId = `p_sec_${index + 1}_p${section.pageStart}`;
     const breadcrumb = section.breadcrumb;
 
+    const sectionImages = (section.images || []).map((img) => ({
+      id: img.id,
+      pageNum: img.pageNum,
+      fileName: img.fileName,
+      relativePath: img.relativePath,
+      url: img.url || img.relativePath,
+      width: img.width,
+      height: img.height,
+      hash: img.hash,
+      caption: img.caption,
+    }));
+    const sectionImageUrls = sectionImages.map((img) => img.url);
+    const parentHasDiagrams = /```mermaid/i.test(parentBody);
+
     // 1. Map to IParentChunk (Level 2: complete section for LLM context)
     const parentChunk: IParentChunk = {
       id: parentId,
@@ -35,6 +49,9 @@ export function chunkFormattedBook(
         chapterTitle: section.parentTitle || section.title,
         subtopicTitle: section.title,
         breadcrumb,
+        images: sectionImages,
+        imageUrls: sectionImageUrls,
+        hasDiagrams: parentHasDiagrams,
       },
     };
     parents.push(parentChunk);
@@ -47,6 +64,14 @@ export function chunkFormattedBook(
     );
 
     rawSlices.forEach((slice, sliceIndex) => {
+      // Find images that appear in this specific slice
+      const sliceImages = sectionImages.filter(
+        (img) =>
+          slice.includes(img.relativePath) || slice.includes(img.fileName),
+      );
+      const sliceImageUrls = sliceImages.map((img) => img.url);
+      const sliceHasDiagrams = /```mermaid/i.test(slice);
+
       // Inject breadcrumb prefix directly into child embedding text
       const enrichedChildText = `${breadcrumb}\n\n${slice}`;
 
@@ -61,6 +86,9 @@ export function chunkFormattedBook(
           chapterTitle: section.parentTitle || section.title,
           subtopicTitle: section.title,
           breadcrumb,
+          images: sliceImages,
+          imageUrls: sliceImageUrls,
+          hasDiagrams: sliceHasDiagrams,
         },
       });
     });

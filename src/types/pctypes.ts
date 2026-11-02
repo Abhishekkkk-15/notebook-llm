@@ -9,6 +9,9 @@ export interface IChunkPineconeMetadata extends RecordMetadata {
   chapterTitle: string;
   subtopicTitle: string;
   breadcrumb: string;
+  imageUrls: string[];
+  hasImages: boolean;
+  hasDiagrams: boolean;
 }
 
 // 2. Your internal application chunk interface

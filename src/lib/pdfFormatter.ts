@@ -11,12 +11,14 @@ export interface FormattedSection {
   pageStart: number;
   pageEnd: number;
   content: string;
+  images?: ExtractedImage[];
 }
 
 export interface FormattedBook {
   bookTitle: string;
   totalPages: number;
   sections: FormattedSection[];
+  images?: ExtractedImage[];
 }
 
 export interface PdfReaderOptions {
@@ -30,9 +32,11 @@ export interface ExtractedImage {
   pageNum: number;
   fileName: string;
   relativePath: string;
+  url: string;
   width: number;
   height: number;
   hash: string;
+  caption?: string;
 }
 
 // ==========================================
@@ -169,6 +173,7 @@ async function extractPageImages(
               pageNum: pNum,
               fileName: path.basename(relPath),
               relativePath: relPath,
+              url: relPath,
               width: img.width,
               height: img.height,
               hash,
@@ -239,6 +244,7 @@ export function convertFlowToMermaid(rawText: string): string | null {
 interface RawPage {
   pageNum: number;
   text: string;
+  images: ExtractedImage[];
 }
 
 interface OutlineNode {
@@ -783,7 +789,12 @@ function parsePageLayoutAndTables(
   seenHeaderHashes: Set<string> = new Set(),
   pageNum: number = 1,
   pdfBaseName: string = "document",
-): { text: string; carriedCaption: string; carriedHeader?: string[] } {
+): {
+  text: string;
+  carriedCaption: string;
+  carriedHeader?: string[];
+  images: ExtractedImage[];
+} {
   // 1. Group items into visual lines by matching Y coordinates
   items.sort((a, b) => (Math.abs(b.y - a.y) > 2.5 ? b.y - a.y : a.x - b.x));
   const rawLines: ProcessedLine[] = [];
@@ -809,6 +820,7 @@ function parsePageLayoutAndTables(
     /^(Table\s+\d+[\-\.:]\d*|\bTable\b)\s*[:\-\.]?\s*(.+)?/i;
 
   const claimedImageIds = new Set<string>();
+  const emittedImageIds = new Set<string>();
 
   // Document / Page Header Banner (e.g. university letterhead or book top logo)
   for (const img of pageImages) {
@@ -816,7 +828,9 @@ function parsePageLayoutAndTables(
     if (isBanner) {
       if (!seenHeaderHashes.has(img.hash)) {
         seenHeaderHashes.add(img.hash);
-        outputBlocks.push(`![${pdfBaseName} Header](${img.relativePath})`);
+        img.caption = `${pdfBaseName} Header`;
+        outputBlocks.push(`![${img.caption}](${img.relativePath})`);
+        emittedImageIds.add(img.id);
       }
       claimedImageIds.add(img.id);
     }
@@ -848,10 +862,12 @@ function parsePageLayoutAndTables(
     if (isFigureCaptionLine(line)) {
       const unclaimedImg = pageImages.find((img) => !claimedImageIds.has(img.id));
       if (unclaimedImg) {
+        unclaimedImg.caption = line.rawText;
         outputBlocks.push(
           `![${line.rawText}](${unclaimedImg.relativePath})\n\n**${line.rawText}**`,
         );
         claimedImageIds.add(unclaimedImg.id);
+        emittedImageIds.add(unclaimedImg.id);
       } else {
         outputBlocks.push(`\n**${line.rawText}**\n`);
       }
@@ -1007,10 +1023,12 @@ function parsePageLayoutAndTables(
   // Any remaining content images on this page that were not associated with a caption
   for (const img of pageImages) {
     if (!claimedImageIds.has(img.id)) {
+      img.caption = `Figure (${pdfBaseName} page ${pageNum})`;
       outputBlocks.push(
-        `![Figure (${pdfBaseName} page ${pageNum})](${img.relativePath})`,
+        `![${img.caption}](${img.relativePath})`,
       );
       claimedImageIds.add(img.id);
+      emittedImageIds.add(img.id);
     }
   }
 
@@ -1018,6 +1036,7 @@ function parsePageLayoutAndTables(
     text: outputBlocks.join("\n\n"),
     carriedCaption: pendingCaption,
     carriedHeader: lastActiveHeader,
+    images: pageImages.filter((img) => emittedImageIds.has(img.id)),
   };
 }
 
@@ -1079,6 +1098,7 @@ async function extractRawPages(
       text,
       carriedCaption: nextCaption,
       carriedHeader: nextHeader,
+      images: layoutImages,
     } = parsePageLayoutAndTables(
       items,
       carriedCaption,
@@ -1093,7 +1113,7 @@ async function extractRawPages(
     carriedCaption = nextCaption;
     carriedHeader = nextHeader;
 
-    pages.push({ pageNum: i, text: text.trim() });
+    pages.push({ pageNum: i, text: text.trim(), images: layoutImages });
   }
 
   return pages;
@@ -1219,8 +1239,8 @@ export async function readAndFormatPdf(
     const startPage = current!.pageIndex;
     const endPage = next ? next.pageIndex : pages.length;
 
-    const content = pages
-      .slice(startPage, endPage)
+    const sectionPages = pages.slice(startPage, endPage);
+    const content = sectionPages
       .map((p) => p.text)
       .join("\n\n")
       .trim();
@@ -1230,6 +1250,15 @@ export async function readAndFormatPdf(
     const parentPrefix =
       current!.parentTitle ? `${current!.parentTitle} > ` : "";
     const breadcrumb = `[${bookTitle} > ${parentPrefix}${current!.title}]`;
+    
+    const seenSecHashes = new Set<string>();
+    const sectionImages: ExtractedImage[] = [];
+    for (const img of sectionPages.flatMap((p) => p.images || [])) {
+      if (!seenSecHashes.has(img.hash)) {
+        seenSecHashes.add(img.hash);
+        sectionImages.push(img);
+      }
+    }
 
     sections.push({
       title: current!.title,
@@ -1238,12 +1267,24 @@ export async function readAndFormatPdf(
       pageStart: startPage + 1,
       pageEnd: endPage,
       content,
+      images: sectionImages,
     });
+  }
+
+  const allImages = pages.flatMap((p) => p.images || []);
+  const seenHashes = new Set<string>();
+  const uniqueImages: ExtractedImage[] = [];
+  for (const img of allImages) {
+    if (!seenHashes.has(img.hash)) {
+      seenHashes.add(img.hash);
+      uniqueImages.push(img);
+    }
   }
 
   return {
     bookTitle,
     totalPages: doc.numPages,
     sections,
+    images: uniqueImages,
   };
 }
