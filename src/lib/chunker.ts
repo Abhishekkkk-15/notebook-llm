@@ -36,6 +36,9 @@ export function chunkFormattedBook(
       caption: img.caption,
     }));
     const sectionImageUrls = sectionImages.map((img) => img.url);
+    const sectionImageCaptions = sectionImages
+      .map((img) => img.caption || "")
+      .filter(Boolean);
     const parentHasDiagrams = /```mermaid/i.test(parentBody);
 
     // 1. Map to IParentChunk (Level 2: complete section for LLM context)
@@ -49,8 +52,10 @@ export function chunkFormattedBook(
         chapterTitle: section.parentTitle || section.title,
         subtopicTitle: section.title,
         breadcrumb,
+        type: "text",
         images: sectionImages,
         imageUrls: sectionImageUrls,
+        imageCaptions: sectionImageCaptions,
         hasDiagrams: parentHasDiagrams,
       },
     };
@@ -70,6 +75,9 @@ export function chunkFormattedBook(
           slice.includes(img.relativePath) || slice.includes(img.fileName),
       );
       const sliceImageUrls = sliceImages.map((img) => img.url);
+      const sliceImageCaptions = sliceImages
+        .map((img) => img.caption || "")
+        .filter(Boolean);
       const sliceHasDiagrams = /```mermaid/i.test(slice);
 
       // Inject breadcrumb prefix directly into child embedding text
@@ -86,8 +94,10 @@ export function chunkFormattedBook(
           chapterTitle: section.parentTitle || section.title,
           subtopicTitle: section.title,
           breadcrumb,
+          type: "text",
           images: sliceImages,
           imageUrls: sliceImageUrls,
+          imageCaptions: sliceImageCaptions,
           hasDiagrams: sliceHasDiagrams,
         },
       });

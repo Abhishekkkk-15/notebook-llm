@@ -16,8 +16,10 @@ export type TMetadata = {
   chapterTitle: string;
   subtopicTitle: string;
   breadcrumb: string;
+  type?: "text" | "image";
   images?: IImageMetadata[];
   imageUrls?: string[];
+  imageCaptions?: string[];
   hasDiagrams?: boolean;
 };
 

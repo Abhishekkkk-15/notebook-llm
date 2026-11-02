@@ -40,7 +40,14 @@ export class PinconeStore {
         chapterTitle: chunk.metadata.chapterTitle,
         subtopicTitle: chunk.metadata.subtopicTitle,
         breadcrumb: chunk.metadata.breadcrumb,
+        type: chunk.metadata.type ?? "text",
         imageUrls: chunk.metadata.imageUrls ?? [],
+        imageCaptions:
+          chunk.metadata.imageCaptions ??
+          (chunk.metadata.images ?? [])
+            .map((img) => img.caption || "")
+            .filter(Boolean),
+        imagesJson: JSON.stringify(chunk.metadata.images ?? []),
         hasImages: (chunk.metadata.imageUrls?.length ?? 0) > 0,
         hasDiagrams: chunk.metadata.hasDiagrams ?? false,
       },
