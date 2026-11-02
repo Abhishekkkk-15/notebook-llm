@@ -12,6 +12,7 @@ import type { IProjectDoc } from "../lib/db/project.model.js";
 import { PinconeStore } from "../lib/db/pc_store.js";
 import { build_system_prompt, flat_chunks, llm } from "../lib/llm/embedding.js";
 import { MemoryRegistory } from "../lib/llm/memory_registory.js";
+import type { IChildChunk } from "../types/chunktypes.js";
 
 export interface IIngestOption {
   projectId?: string;
@@ -36,6 +37,8 @@ export interface IQueryOption {
 export interface IQueryResponse {
   answer?: string;
   projectId?: string;
+  images?: any[];
+  imageUrls?: string[];
   sources: Array<{
     id: string;
     score: number;
@@ -75,10 +78,7 @@ export class RAGPipeline {
     return await this.projectStore.getProject(projectId);
   }
 
-  async deleteProject(
-    projectId: string,
-    namespace?: string,
-  ): Promise<boolean> {
+  async deleteProject(projectId: string, namespace?: string): Promise<boolean> {
     await Promise.all([
       this.parentStore.deleteParentsByProject(projectId),
       this.pcStore.deleteByProjectId(projectId, namespace),
@@ -107,7 +107,9 @@ export class RAGPipeline {
       option.projectId || this.generateProjectId(projectName || fileName);
     const fileStats = fs.statSync(resolvedPath);
 
-    option.onProgress?.(`Registering project: ${projectName} (${projectId})...`);
+    option.onProgress?.(
+      `Registering project: ${projectName} (${projectId})...`,
+    );
 
     // 1. Initialize project in MongoDB
     await this.projectStore.createOrUpdateProject({
@@ -120,7 +122,9 @@ export class RAGPipeline {
     });
 
     try {
-      option.onProgress?.("Parsing PDF, extracting images & Mermaid diagrams...");
+      option.onProgress?.(
+        "Parsing PDF, extracting images & Mermaid diagrams...",
+      );
       const formatted = await readAndFormatPdf(resolvedPath, {
         bookTitle,
       });
@@ -137,13 +141,16 @@ export class RAGPipeline {
       });
 
       const totalImages = formatted.images?.length ?? 0;
-      const totalDiagrams = parents.filter((p) => p.metadata.hasDiagrams).length;
+      const totalDiagrams = parents.filter(
+        (p) => p.metadata.hasDiagrams,
+      ).length;
 
       option.onProgress?.(
         `Generating embeddings for ${children.length} child chunks...`,
       );
 
-      const child_with_vec = [];
+      const child_with_vec: Array<{ chunk: IChildChunk; vector: number[] }> =
+        [];
       for (let i = 0; i < children.length; i++) {
         const c = children[i]!;
         const vector = await this.llmClient.generate_embedding(
@@ -153,7 +160,9 @@ export class RAGPipeline {
         );
 
         if (!vector) {
-          throw new Error(`Failed to generate embedding for child chunk ${c.id}`);
+          throw new Error(
+            `Failed to generate embedding for child chunk ${c.id}`,
+          );
         }
 
         child_with_vec.push({ chunk: c, vector });
@@ -217,9 +226,8 @@ export class RAGPipeline {
     const full_content = await this.hybrid_search({ ...option, namespace });
 
     if (!full_content || full_content.length === 0) {
-      const scopeMsg = option.projectId
-        ? ` in project '${option.projectId}'`
-        : "";
+      const scopeMsg =
+        option.projectId ? ` in project '${option.projectId}'` : "";
       return {
         answer: `No relevant documents found matching your query${scopeMsg}. Please check that the PDF is ingested.`,
         projectId: option.projectId,
@@ -234,11 +242,31 @@ export class RAGPipeline {
       "## Sources : \n " +
       flat_chunks(full_content);
 
-    const res = await this.llmClient.generate_completion(user_message);
+    const allImages: any[] = [];
+    const allImageUrls: string[] = [];
+    const seenHashes = new Set<string>();
+
+    for (const doc of full_content) {
+      for (const img of doc.metadata.images || []) {
+        const key = img.hash || img.url;
+        if (!seenHashes.has(key)) {
+          seenHashes.add(key);
+          allImages.push(img);
+          allImageUrls.push(img.url);
+        }
+      }
+    }
+
+    const res = await this.llmClient.generate_completion({
+      user_message: user_message,
+      images: allImageUrls.slice(0, 5),
+    });
 
     return {
       answer: res?.content ?? undefined,
       projectId: option.projectId,
+      images: allImages,
+      imageUrls: allImageUrls,
       sources: full_content.map((c) => ({
         id: String(c.chunkId || c._id),
         score: (c as any).rrfScore || 0,

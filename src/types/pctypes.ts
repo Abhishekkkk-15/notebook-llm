@@ -11,6 +11,7 @@ export interface IChunkPineconeMetadata extends RecordMetadata {
   subtopicTitle: string;
   breadcrumb: string;
   type: string;
+  imageUrl: string;
   imageUrls: string[];
   imageCaptions: string[];
   imagesJson: string;

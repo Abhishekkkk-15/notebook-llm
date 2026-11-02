@@ -65,7 +65,7 @@ export function chunkFormattedBook(
     };
     parents.push(parentChunk);
 
-    // 2. Slice Parent Body into Child Chunks (Level 3: for Vector Search)
+    // 2. Slice Parent Body into Child Chunks (Level 3: for Text Vector Search)
     const rawSlices = splitIntoIChildChunks(
       parentBody,
       childChunkTokenSize,
@@ -104,6 +104,34 @@ export function chunkFormattedBook(
           imageUrls: sliceImageUrls,
           imageCaptions: sliceImageCaptions,
           hasDiagrams: sliceHasDiagrams,
+        },
+      });
+    });
+
+    // 3. Dedicated Image Child Chunks (Level 3: for Multimodal / Image Vector Search)
+    sectionImages.forEach((img, imgIndex) => {
+      const imgDesc = img.caption
+        ? `Figure: ${img.caption}`
+        : `Image file: ${img.fileName} (Page ${img.pageNum})`;
+      const enrichedImageText = `${breadcrumb}\n\n${imgDesc}`;
+
+      children.push({
+        id: `${parentId}_img_${img.id || imgIndex + 1}`,
+        parentId: parentId,
+        text: enrichedImageText,
+        tokenCount: estimateTokens(enrichedImageText),
+        metadata: {
+          projectId,
+          bookTitle,
+          chapterNumber: index + 1,
+          chapterTitle: section.parentTitle || section.title,
+          subtopicTitle: section.title,
+          breadcrumb,
+          type: "image",
+          images: [img],
+          imageUrls: [img.url],
+          imageCaptions: img.caption ? [img.caption] : [],
+          hasDiagrams: false,
         },
       });
     });

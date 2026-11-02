@@ -42,6 +42,7 @@ export class PinconeStore {
         subtopicTitle: chunk.metadata.subtopicTitle,
         breadcrumb: chunk.metadata.breadcrumb,
         type: chunk.metadata.type ?? "text",
+        imageUrl: chunk.metadata.imageUrls?.[0] ?? "",
         imageUrls: chunk.metadata.imageUrls ?? [],
         imageCaptions:
           chunk.metadata.imageCaptions ??

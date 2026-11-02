@@ -100,15 +100,17 @@ export class LLM {
   }
 
   @RateLimitRetry({ maxRetries: 3, initialDelayMs: 1000 })
-  async generate_completion(
-    user_message: string,
-  ): Promise<ChatCompletionMessage | undefined> {
+  async generate_completion(option: {
+    user_message: string;
+    images?: string[];
+  }): Promise<ChatCompletionMessage | undefined> {
     try {
-      await this.memory_store.user(user_message);
+      await this.memory_store.user(option.user_message, option.images);
       const messages = await this.memory_store.get_message();
       let res = await this.az_client.chat.completions.create({
         messages,
         model: "gpt-5.6-luna",
+        temperature: 0.3,
       });
 
       this.memory_store.assistent(
