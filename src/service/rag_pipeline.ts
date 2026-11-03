@@ -342,6 +342,33 @@ export class RAGPipeline {
     };
   }
 
+  /**
+   * Execute multi-step Agentic ReAct query using tools.
+   */
+  async agentQuery(option: {
+    query: string;
+    projectId: string;
+    iterationLimit?: number;
+    onStep?: (step: any) => void;
+  }): Promise<{
+    answer: string;
+    steps: any[];
+    projectId?: string;
+  }> {
+    const res = await this.llmClient.agentRunTime({
+      user_query: option.query,
+      projectId: option.projectId,
+      iterationLimit: option.iterationLimit ?? 8,
+      onSteps: option.onStep,
+    });
+
+    return {
+      answer: res?.answer || "No response generated.",
+      steps: res?.steps || [],
+      projectId: option.projectId,
+    };
+  }
+
   // Hybrid Search: Pinecone Vector + MongoDB Text Search merged via RRF (strictly filtered by projectId)
   async hybrid_search(option: IQueryOption): Promise<IParentChunkDoc[]> {
     const namespace = option.namespace ?? "child_chunks";

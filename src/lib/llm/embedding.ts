@@ -1,10 +1,14 @@
 import OpenAI from "openai";
 import { AzureOpenAI } from "openai/azure.js";
 import type {
+  ChatCompletionCreateParamsNonStreaming,
   ChatCompletionMessage,
   ChatCompletionMessageParam,
+  ChatCompletionTool,
   ChatCompletionUserMessageParam,
   Embedding,
+  FunctionDefinition,
+  FunctionParameters,
 } from "openai/resources";
 
 import { config } from "dotenv";
@@ -15,6 +19,7 @@ import type { IParentChunk } from "../../types/chunktypes.js";
 import { MemoryRegistory } from "./memory_registory.js";
 import { zodResponseFormat } from "openai/helpers/zod.mjs";
 import { keyword_schema } from "../schema.js";
+import { executeTool, tools } from "./tools.js";
 
 type TProvider = "AZURE" | "NVIDIA";
 const MODELS = {
@@ -40,11 +45,65 @@ Your task is to answer the user's questions accurately and concisely using ONLY 
 `;
 }
 
+// {
+//     type: "function",
+//     name: "get_horoscope",
+//     description: "Get today's horoscope for an astrological sign.",
+//     parameters: {
+//       type: "object",
+//       properties: {
+//         sign: {
+//           type: "string",
+//           description: "An astrological sign like Taurus or Aquarius",
+//         },
+//       },
+//       required: ["sign"],
+//       additionalProperties: false,
+//     },
+//     strict: true,
+//   },
+
+function getTools() {
+  const tools: ChatCompletionTool[] = [
+    {
+      type: "function",
+      function: {
+        name: "hybrid_search",
+        description: "Run hybrid search over MongoDB.",
+        parameters: {
+          type: "object",
+          properties: {
+            options: {
+              type: "object",
+              description: "Configuration options for the hybrid search.",
+              properties: {
+                query: {
+                  type: "string",
+                  description:
+                    "Query string or terms to search for in hybrid_search",
+                },
+                topK: {
+                  type: "integer",
+                  description: "Number of records to return. Default is 5.",
+                  default: 5,
+                },
+              },
+              required: ["query"],
+            },
+          },
+          required: ["options"],
+        },
+      },
+    },
+  ];
+  return tools;
+}
+
 export class LLM {
   private az_client: OpenAI;
   private inv_client: OpenAI;
   private memory_store: MemoryRegistory;
-
+  private tools: ChatCompletionTool[];
   //   private embedding_client :
   constructor() {
     let nvidia_api_key = process.env.NVIDIA_KEY;
@@ -62,6 +121,7 @@ export class LLM {
       baseURL: nvidia_base_url,
     });
     this.memory_store = new MemoryRegistory();
+    this.tools = getTools();
   }
 
   //   get_client(provider:TProvider = "NVIDIA"):OpenAI{
@@ -99,7 +159,6 @@ export class LLM {
     }
   }
 
-  @RateLimitRetry({ maxRetries: 3, initialDelayMs: 1000 })
   async generate_completion(option: {
     user_message: string;
     images?: string[];
@@ -107,19 +166,99 @@ export class LLM {
     try {
       await this.memory_store.user(option.user_message, option.images);
       const messages = await this.memory_store.get_message();
-      let res = await this.az_client.chat.completions.create({
+      let res = await this.completion({
         messages,
-        model: "gpt-5.6-luna"
+        model: "gpt-5.6-luna",
+        tools: this.tools,
       });
+      if (!res) {
+        return undefined;
+      }
+      this.memory_store.assistent(res.content as string, res.tool_calls);
 
-      this.memory_store.assistent(
-        res.choices[0]?.message.content as string,
-        res.choices[0]?.message.tool_calls,
-      );
-
-      return res.choices[0]?.message;
+      return res;
     } catch (error) {
       console.log("Error in Generation ", error);
+    }
+  }
+
+  @RateLimitRetry({ maxRetries: 3, initialDelayMs: 1000 })
+  async completion(
+    options: ChatCompletionCreateParamsNonStreaming,
+  ): Promise<ChatCompletionMessage | undefined> {
+    return (await this.az_client.chat.completions.create({ ...options }))
+      .choices[0]?.message;
+  }
+
+  async agentRunTime(
+    options: TAgentRunTimeOptions,
+  ): Promise<IAgentResponse> {
+    this.memory_store.user(options.user_query);
+    const executedSteps: IAgentStep[] = [];
+    let currentIteration = 0;
+    while (true) {
+      if (currentIteration >= options.iterationLimit) {
+        await this.memory_store.developer(
+          "Reached iteration limit. Please synthesize a final answer based on all gathered evidence so far.",
+        );
+        const messages = await this.memory_store.get_message();
+        const finalRes = await this.completion({
+          model: "gpt-5.6-luna",
+          messages,
+        });
+        return {
+          answer:
+            finalRes?.content ||
+            "Reached maximum iteration limit without concluding.",
+          steps: executedSteps,
+        };
+
+      }
+      currentIteration++;
+      try {
+        const messages = await this.memory_store.get_message();
+        const res = await this.completion({
+          model: "gpt-5.6-luna",
+          tools: tools,
+          messages,
+        });
+
+        const tool_calls = res?.tool_calls;
+        this.memory_store.assistent(res?.content || null, tool_calls);
+        if (tool_calls) {
+          for (let idx = 0; idx < tool_calls.length; idx++) {
+            const item = tool_calls[idx];
+            if (item == undefined) continue;
+            if (item.type !== "function") continue;
+            const parsedArguments = JSON.parse(item?.function.arguments!);
+            const fnName = item?.function.name as string;
+
+            let toolResult = await executeTool(fnName, {
+              ...parsedArguments,
+              projectId: options.projectId,
+            });
+            const step: IAgentStep = {
+              iteration: currentIteration,
+              tool: fnName,
+              args: parsedArguments,
+              result: toolResult,
+            };
+            options.onSteps?.(step);
+            executedSteps.push(step);
+            this.memory_store.tool({
+              tool_id: item.id as string,
+              content: toolResult,
+            });
+          }
+          continue;
+        }
+        return {
+          answer: res?.content || "",
+          steps: executedSteps,
+        };
+      } catch (error: any) {
+        throw Error(`Error in Agent Loop ${error.message}`);
+      }
     }
   }
 
@@ -149,5 +288,24 @@ export class LLM {
     }
   }
 }
+
+export interface IAgentStep {
+  iteration: number;
+  tool: string;
+  args: Record<string, any>;
+  result: any;
+}
+
+export interface IAgentResponse {
+  answer: string;
+  steps: IAgentStep[];
+}
+
+type TAgentRunTimeOptions = {
+  user_query: string;
+  iterationLimit: number;
+  projectId: string;
+  onSteps?: (step: IAgentStep) => void;
+};
 
 export const llm = new LLM();

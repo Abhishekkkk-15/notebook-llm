@@ -199,36 +199,33 @@ export class InteractiveTUI {
       }
 
       const s = p.spinner();
-      s.start("Retrieving relevant sections & generating answer...");
+      s.start("Agent reasoning & planning...");
       const startTime = Date.now();
 
       try {
-        const response = await this.ragPipeline.query({
+        const response = await this.ragPipeline.agentQuery({
           query: question.trim(),
           projectId: this.activeProject.projectId,
-          topK: 5,
+          iterationLimit: 8,
+          onStep: (step) => {
+            s.message(`🔧 [Step ${step.iteration}] Executing tool: ${step.tool}...`);
+          },
         });
 
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
         s.stop(`Synthesized answer in ${elapsed}s`);
 
-        printAnswerCard("Synthesized Answer", response.answer || "No response generated.");
+        printAnswerCard("Agent Answer", response.answer || "No response generated.");
 
-        if (response.sources && response.sources.length > 0) {
-          console.log(`\x1b[90m📚 Retrieved Sources (${response.sources.length}):\x1b[0m`);
-          response.sources.forEach((source, idx) => {
+        if (response.steps && response.steps.length > 0) {
+          console.log(`\x1b[90m🛠️  Executed Tools (${response.steps.length}):\x1b[0m`);
+          response.steps.forEach((step, idx) => {
+            const argsStr = JSON.stringify(step.args || {});
             console.log(
-              `  \x1b[33m[${idx + 1}]\x1b[0m \x1b[1m${source.breadcrumb || source.id}\x1b[0m \x1b[90m(RRF Score: ${source.score.toFixed(4)})\x1b[0m`,
+              `  \x1b[33m[${idx + 1}]\x1b[0m \x1b[1m${step.tool}\x1b[0m \x1b[90m${argsStr}\x1b[0m`,
             );
-            if (source.imageUrls && source.imageUrls.length > 0) {
-              console.log(
-                `      📸 \x1b[32mImages (${source.imageUrls.length}):\x1b[0m ${source.imageUrls.join(", ")}`,
-              );
-            }
           });
           console.log("\n" + "─".repeat(60) + "\n");
-
-          await this.inspectSourceChunks(response.sources);
         }
       } catch (err: any) {
         s.stop("Query failed");

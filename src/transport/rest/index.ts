@@ -11,7 +11,9 @@ import { createRestApp } from "./app.js";
 config();
 dns.setServers(["8.8.8.8", "8.8.4.4"]);
 
-export async function startServer(customPort?: number): Promise<{ app: any; server: Server; port: number }> {
+export async function startServer(
+  customPort?: number,
+): Promise<{ app: any; server: Server; port: number }> {
   const port = customPort || Number(process.env.PORT) || 3000;
   const pcStore = new PinconeStore();
   const ragPipeline = new RAGPipeline(
@@ -25,27 +27,50 @@ export async function startServer(customPort?: number): Promise<{ app: any; serv
 
   return new Promise((resolve) => {
     const server = app.listen(port, () => {
-      console.log(`\n\x1b[36m╭─ 🚀 Notebook-LLM REST API Server Started ─────────────────────────╮\x1b[0m`);
-      console.log(`\x1b[36m│\x1b[0m  \x1b[90mBase URL:       \x1b[0m\x1b[32mhttp://localhost:${port}\x1b[0m`);
-      console.log(`\x1b[36m│\x1b[0m  \x1b[90mHealth Check:   \x1b[0mGET  http://localhost:${port}/api/health`);
-      console.log(`\x1b[36m│\x1b[0m  \x1b[90mList Projects:  \x1b[0mGET  http://localhost:${port}/api/projects`);
-      console.log(`\x1b[36m│\x1b[0m  \x1b[90mUpload PDF:     \x1b[0mPOST http://localhost:${port}/api/projects/ingest`);
-      console.log(`\x1b[36m│\x1b[0m  \x1b[90mAsk Question:   \x1b[0mPOST http://localhost:${port}/api/rag/query`);
-      console.log(`\x1b[36m│\x1b[0m  \x1b[90mHybrid Search:  \x1b[0mPOST http://localhost:${port}/api/rag/search`);
-      console.log(`\x1b[36m│\x1b[0m  \x1b[90mStatic Images:  \x1b[0mGET  http://localhost:${port}/assets/images/...`);
-      console.log(`\x1b[36m╰───────────────────────────────────────────────────────────────────╯\x1b[0m\n`);
+      console.log(
+        `\n\x1b[36m╭─ 🚀 Notebook-LLM REST API Server Started ─────────────────────────╮\x1b[0m`,
+      );
+      console.log(
+        `\x1b[36m│\x1b[0m  \x1b[90mBase URL:       \x1b[0m\x1b[32mhttp://localhost:${port}\x1b[0m`,
+      );
+      console.log(
+        `\x1b[36m│\x1b[0m  \x1b[90mHealth Check:   \x1b[0mGET  http://localhost:${port}/api/health`,
+      );
+      console.log(
+        `\x1b[36m│\x1b[0m  \x1b[90mList Projects:  \x1b[0mGET  http://localhost:${port}/api/projects`,
+      );
+      console.log(
+        `\x1b[36m│\x1b[0m  \x1b[90mUpload PDF:     \x1b[0mPOST http://localhost:${port}/api/projects/ingest`,
+      );
+      console.log(
+        `\x1b[36m│\x1b[0m  \x1b[90mAsk Question:   \x1b[0mPOST http://localhost:${port}/api/rag/query`,
+      );
+      console.log(
+        `\x1b[36m│\x1b[0m  \x1b[90mHybrid Search:  \x1b[0mPOST http://localhost:${port}/api/rag/search`,
+      );
+      console.log(
+        `\x1b[36m│\x1b[0m  \x1b[90mStatic Images:  \x1b[0mGET  http://localhost:${port}/assets/images/...`,
+      );
+      console.log(
+        `\x1b[36m╰───────────────────────────────────────────────────────────────────╯\x1b[0m\n`,
+      );
       resolve({ app, server, port });
     });
   });
 }
 
 // Auto-run if executed directly via node or tsx
-const isDirectExecution =
-  process.argv[1]?.endsWith("rest/index.ts") ||
-  process.argv[1]?.endsWith("rest/index.js");
 
-if (isDirectExecution) {
-  startServer().catch((err) => {
+
+
+
+const scriptPath = process.argv[1]?.replace(/\\/g, "/") || "";
+const isDirect =
+  scriptPath.endsWith("rest/index.ts") ||
+  scriptPath.endsWith("rest/index.js");
+
+if (isDirect) {
+  startServer(3000).catch((err) => {
     console.error("Fatal Server Startup Error:", err);
     process.exit(1);
   });

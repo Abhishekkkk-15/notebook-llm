@@ -6,12 +6,29 @@ export function createRagRouter(ragPipeline: RAGPipeline): Router {
 
   // Natural Language Q&A Query
   router.post("/query", async (req, res) => {
-    const { query, projectId, topK } = req.body;
+    const { query, projectId, topK, mode } = req.body;
     if (!query || typeof query !== "string" || !query.trim()) {
       return res.status(400).json({ success: false, error: "Field 'query' is required." });
     }
 
     try {
+      if (projectId && mode !== "direct") {
+        const agentRes = await ragPipeline.agentQuery({
+          query: query.trim(),
+          projectId: String(projectId).trim(),
+          iterationLimit: 8,
+        });
+
+        return res.json({
+          success: true,
+          answer: agentRes.answer,
+          steps: agentRes.steps,
+          projectId,
+          sources: [],
+          imageUrls: [],
+        });
+      }
+
       const response = await ragPipeline.query({
         query: query.trim(),
         projectId: projectId ? String(projectId).trim() : undefined,
@@ -32,7 +49,7 @@ export function createRagRouter(ragPipeline: RAGPipeline): Router {
 
   // Semantic / Hybrid Vector Search
   router.post("/search", async (req, res) => {
-    const { query, projectId, topK } = req.body;
+    const { query, projectId, topK, mode } = req.body;
     if (!query || typeof query !== "string" || !query.trim()) {
       return res.status(400).json({ success: false, error: "Field 'query' is required." });
     }

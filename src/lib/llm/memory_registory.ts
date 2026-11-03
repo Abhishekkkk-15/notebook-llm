@@ -5,6 +5,7 @@ import type {
   ChatCompletionMessageToolCall,
 } from "openai/resources";
 import { build_system_prompt } from "./embedding.js";
+import { formatToolResult } from "./tools.js";
 import { readFileSync, existsSync } from "fs";
 import path from "path";
 
@@ -15,11 +16,13 @@ export async function toBase64(imagesPaths?: string[]): Promise<string[]> {
     if (!imagePath || !existsSync(imagePath)) continue;
     try {
       const ext = path.extname(imagePath).toLowerCase().replace(".", "");
-      const mime = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
+      const mime =
+        ext === "png" ? "image/png"
+        : ext === "webp" ? "image/webp"
+        : "image/jpeg";
       const imageBase64 = readFileSync(imagePath, { encoding: "base64" });
       base64Strings.push(`data:${mime};base64,${imageBase64}`);
     } catch {}
-
   }
   return base64Strings;
 }
@@ -71,8 +74,20 @@ export class MemoryRegistory {
     }
   }
 
+  async developer(message: string) {
+    try {
+      let developerMessage: ChatCompletionMessageParam = {
+        role: "developer",
+        content: message,
+      };
+      this.memory_history.push(developerMessage);
+    } catch (error: any) {
+      throw Error("Error in developer messsage , ", error.message);
+    }
+  }
+
   async assistent(
-    assistent_response: string,
+    assistent_response: string | null,
     tool_calls?: ChatCompletionMessageToolCall[],
   ) {
     try {
@@ -86,6 +101,18 @@ export class MemoryRegistory {
     } catch (error) {
       console.log("[Memory Registory Error for Assistent message]", error);
       throw error;
+    }
+  }
+
+  async tool({ content, tool_id }: { content: any; tool_id: string }) {
+    try {
+      this.memory_history.push({
+        role: "tool",
+        content: formatToolResult(content),
+        tool_call_id: tool_id,
+      });
+    } catch (error: any) {
+      throw Error("Error in tool message :  ", error.message);
     }
   }
 }
