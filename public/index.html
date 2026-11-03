@@ -1018,8 +1018,8 @@
             <span class="text-[11px] font-semibold text-stone-500 uppercase tracking-wider block mb-2">Cited Visual Figures</span>
             <div class="flex flex-wrap gap-2">
               ${data.imageUrls.map((url, i) => `
-                <div class="relative group cursor-pointer" onclick="openImageModal('${url}', 'Cited Diagram ${i+1}')">
-                  <img src="/${url}" alt="Figure" class="h-20 w-32 object-cover rounded-lg border border-stone-200 hover:border-amber-400 transition-all shadow-xs" />
+                <div class="relative group cursor-pointer" onclick="openImageModal(formatImageUrl(url), 'Cited Diagram ${i+1}')">
+                  <img src="${formatImageUrl(url)}" alt="Figure" class="h-20 w-32 object-cover rounded-lg border border-stone-200 hover:border-amber-400 transition-all shadow-xs" />
                   <span class="absolute inset-0 bg-stone-950/20 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center text-white">
                     <i data-lucide="zoom-in" class="w-4 h-4"></i>
                   </span>
@@ -1240,6 +1240,10 @@
       // Replace markdown images in section with responsive figures
       readerBody.querySelectorAll("img").forEach(img => {
         img.className = "rounded-xl border border-stone-200 my-4 shadow-sm max-h-96 object-contain cursor-pointer";
+        const rawSrc = img.getAttribute("src");
+        if (rawSrc && !rawSrc.startsWith("http") && !rawSrc.startsWith("data:")) {
+          img.src = formatImageUrl(rawSrc);
+        }
         img.onclick = () => openImageModal(img.src, "Section Figure");
       });
 
@@ -1326,8 +1330,8 @@
         if (item.type === "image") {
           return `
             <div class="bg-white rounded-2xl border border-stone-200 overflow-hidden shadow-xs hover:shadow-sm hover:border-stone-300 transition-all flex flex-col group">
-              <div class="h-44 bg-stone-100 flex items-center justify-center overflow-hidden relative cursor-pointer" onclick="openImageModal('/${item.url}', '${escapeHtml(item.title)}')">
-                <img src="/${item.url}" alt="${escapeHtml(item.title)}" class="w-full h-full object-cover group-hover:scale-102 transition-transform duration-300" />
+              <div class="h-44 bg-stone-100 flex items-center justify-center overflow-hidden relative cursor-pointer" onclick="openImageModal(formatImageUrl(item.url), '${escapeHtml(item.title)}')">
+                <img src="${formatImageUrl(item.url)}" alt="${escapeHtml(item.title)}" class="w-full h-full object-cover group-hover:scale-102 transition-transform duration-300" />
                 <span class="absolute top-2 right-2 bg-stone-900/70 text-white text-[10px] font-semibold px-2 py-0.5 rounded-full backdrop-blur-xs">
                   ${item.page ? `Page ${item.page}` : 'Figure'}
                 </span>
@@ -1339,7 +1343,7 @@
                 </div>
                 <div class="mt-3 pt-3 border-t border-stone-100 flex justify-between items-center text-xs">
                   <span class="text-[10px] text-stone-500 uppercase font-semibold">Image</span>
-                  <button onclick="openImageModal('/${item.url}', '${escapeHtml(item.title)}')" class="text-amber-800 hover:text-amber-900 font-semibold flex items-center space-x-1">
+                  <button onclick="openImageModal(formatImageUrl(item.url), '${escapeHtml(item.title)}')" class="text-amber-800 hover:text-amber-900 font-semibold flex items-center space-x-1">
                     <span>Inspect</span>
                     <i data-lucide="zoom-in" class="w-3.5 h-3.5"></i>
                   </button>
@@ -1480,6 +1484,13 @@
       } finally {
         submitBtn.disabled = false;
       }
+    }
+
+    function formatImageUrl(rawUrl) {
+      if (!rawUrl) return "";
+      let clean = String(rawUrl).replace(/\\/g, "/").trim();
+      clean = clean.replace(/^(\.\/|\/)+/, "");
+      return "/" + clean;
     }
 
     // Lightbox Modal

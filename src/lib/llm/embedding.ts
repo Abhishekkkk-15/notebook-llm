@@ -193,7 +193,11 @@ export class LLM {
   async agentRunTime(
     options: TAgentRunTimeOptions,
   ): Promise<IAgentResponse> {
-    this.memory_store.user(options.user_query);
+    await this.memory_store.user(options.user_query, options.images);
+    const collectedImageUrls: string[] = [];
+    if (options.images && options.images.length > 0) {
+      collectedImageUrls.push(...options.images);
+    }
     const executedSteps: IAgentStep[] = [];
     let currentIteration = 0;
     while (true) {
@@ -211,6 +215,7 @@ export class LLM {
             finalRes?.content ||
             "Reached maximum iteration limit without concluding.",
           steps: executedSteps,
+          imageUrls: collectedImageUrls,
         };
 
       }
@@ -237,6 +242,7 @@ export class LLM {
               ...parsedArguments,
               projectId: options.projectId,
             });
+
             const step: IAgentStep = {
               iteration: currentIteration,
               tool: fnName,
@@ -245,16 +251,48 @@ export class LLM {
             };
             options.onSteps?.(step);
             executedSteps.push(step);
-            this.memory_store.tool({
+            await this.memory_store.tool({
               tool_id: item.id as string,
               content: toolResult,
             });
+
+            if (fnName === "inspect_image" && parsedArguments.imagePath) {
+              const imgPath = String(parsedArguments.imagePath);
+              if (!collectedImageUrls.includes(imgPath)) {
+                collectedImageUrls.push(imgPath);
+              }
+              await this.memory_store.user(
+                `Visual diagram loaded for '${imgPath}':`,
+                [imgPath],
+              );
+            } else if (toolResult) {
+              try {
+                const parsed =
+                  typeof toolResult === "string"
+                    ? JSON.parse(toolResult)
+                    : toolResult;
+                const found: any[] = [];
+                if (Array.isArray(parsed.results)) {
+                  parsed.results.forEach((r: any) => {
+                    if (Array.isArray(r.images)) found.push(...r.images);
+                  });
+                }
+                if (Array.isArray(parsed.images)) found.push(...parsed.images);
+                for (const img of found) {
+                  const u = typeof img === "string" ? img : img?.url;
+                  if (u && !collectedImageUrls.includes(u)) {
+                    collectedImageUrls.push(u);
+                  }
+                }
+              } catch {}
+            }
           }
           continue;
         }
         return {
           answer: res?.content || "",
           steps: executedSteps,
+          imageUrls: collectedImageUrls,
         };
       } catch (error: any) {
         throw Error(`Error in Agent Loop ${error.message}`);
@@ -299,12 +337,14 @@ export interface IAgentStep {
 export interface IAgentResponse {
   answer: string;
   steps: IAgentStep[];
+  imageUrls: string[];
 }
 
-type TAgentRunTimeOptions = {
+export type TAgentRunTimeOptions = {
   user_query: string;
   iterationLimit: number;
   projectId: string;
+  images?: string[];
   onSteps?: (step: IAgentStep) => void;
 };
 

@@ -1,3 +1,4 @@
+import fs from "fs";
 import path from "path";
 import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
@@ -17,9 +18,15 @@ export function createRestApp(ragPipeline: RAGPipeline): Express {
 
   // Static Assets: Serve extracted diagrams and figures
   // Allows web UI or client to view images directly via http://localhost:PORT/assets/images/...
-  const imagesDir = path.resolve(process.cwd(), "extracted_images");
-  app.use("/assets/images", express.static(imagesDir));
-  app.use("/extracted_images", express.static(imagesDir));
+  const assetsImagesDir = path.resolve(process.cwd(), "assets", "images");
+  const assetsDir = path.resolve(process.cwd(), "assets");
+  const extractedImagesDir = path.resolve(process.cwd(), "extracted_images");
+
+  app.use("/assets/images", express.static(assetsImagesDir));
+  app.use("/assets", express.static(assetsDir));
+  app.use("/extracted_images", express.static(extractedImagesDir));
+
+
 
   // Serve Public Web UI (White + Beige Shadcn Theme)
   const publicDir = path.resolve(process.cwd(), "public");

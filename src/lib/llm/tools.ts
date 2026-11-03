@@ -1,3 +1,4 @@
+import fs from "fs";
 import type { ChatCompletionTool } from "openai/resources";
 import { mongoParentStore } from "../db/mongo_store.js";
 import { mongoProjectStore } from "../db/project_store.js";
@@ -129,6 +130,25 @@ export const tools: ChatCompletionTool[] = [
           },
         },
         required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "inspect_image",
+      description:
+        "Inspect and visually analyze an image or diagram from the document using its file path (e.g. from hybrid_search or read_section). Loads the visual pixels directly into the conversation for multimodal vision analysis.",
+      parameters: {
+        type: "object",
+        properties: {
+          imagePath: {
+            type: "string",
+            description:
+              "The relative or absolute file path of the image or diagram to visually inspect (e.g. './extracted_images/ai/page_12_img_1.png').",
+          },
+        },
+        required: ["imagePath"],
       },
     },
   },
@@ -375,6 +395,32 @@ export async function vectorSearchTool(args: {
   };
 }
 
+export async function inspectImageTool(args: {
+  imagePath: string;
+}): Promise<any> {
+  const imagePath = args.imagePath;
+  if (!imagePath) {
+    return { error: "Missing required parameter 'imagePath'." };
+  }
+
+  const exists = fs.existsSync(imagePath);
+  if (!exists) {
+    return {
+      success: false,
+      imagePath,
+      error: `Image file '${imagePath}' not found on disk.`,
+    };
+  }
+
+  const stats = fs.statSync(imagePath);
+  return {
+    success: true,
+    imagePath,
+    fileSizeBytes: stats.size,
+    message: `Image '${imagePath}' loaded into visual context for analysis.`,
+  };
+}
+
 // ============================================================================
 // 4. Tool Registry Map & Dispatcher
 // ============================================================================
@@ -388,6 +434,7 @@ export const toolRegistry: Record<string, ToolHandler> = {
   read_section: readSectionTool,
   get_project_stats: getProjectStatsTool,
   vector_search: vectorSearchTool,
+  inspect_image: inspectImageTool,
 };
 
 /**

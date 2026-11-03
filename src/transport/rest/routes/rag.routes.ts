@@ -16,6 +16,7 @@ export function createRagRouter(ragPipeline: RAGPipeline): Router {
         const agentRes = await ragPipeline.agentQuery({
           query: query.trim(),
           projectId: String(projectId).trim(),
+          images: Array.isArray(req.body.images) ? req.body.images : undefined,
           iterationLimit: 8,
         });
 
@@ -25,7 +26,7 @@ export function createRagRouter(ragPipeline: RAGPipeline): Router {
           steps: agentRes.steps,
           projectId,
           sources: [],
-          imageUrls: [],
+          imageUrls: agentRes.imageUrls || [],
         });
       }
 

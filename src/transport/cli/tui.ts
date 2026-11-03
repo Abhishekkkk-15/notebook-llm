@@ -227,6 +227,13 @@ export class InteractiveTUI {
           });
           console.log("\n" + "─".repeat(60) + "\n");
         }
+        if (response.imageUrls && response.imageUrls.length > 0) {
+          console.log(`\x1b[90m📸 Visual Figures (${response.imageUrls.length}):\x1b[0m`);
+          response.imageUrls.forEach((url, idx) => {
+            console.log(`  \x1b[32m[Fig ${idx + 1}]\x1b[0m ${url}`);
+          });
+          console.log("\n" + "─".repeat(60) + "\n");
+        }
       } catch (err: any) {
         s.stop("Query failed");
         p.log.error(`Query Error: ${err.message || String(err)}`);
@@ -625,7 +632,7 @@ export class InteractiveTUI {
               if (renderedImg) {
                 console.log(renderedImg);
               }
-            } catch (err: any) {
+      } catch (err: any) {
               p.log.warn(`Image preview error: ${err.message}`);
             }
           } else {

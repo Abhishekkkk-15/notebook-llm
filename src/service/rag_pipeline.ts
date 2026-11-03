@@ -295,6 +295,7 @@ export class RAGPipeline {
       return {
         answer: `No relevant documents found matching your query${scopeMsg}. Please check that the PDF is ingested.`,
         projectId: option.projectId,
+
         sources: [],
       };
     }
@@ -329,6 +330,7 @@ export class RAGPipeline {
     return {
       answer: res?.content ?? undefined,
       projectId: option.projectId,
+
       images: allImages,
       imageUrls: allImageUrls,
       sources: full_content.map((c) => ({
@@ -348,16 +350,19 @@ export class RAGPipeline {
   async agentQuery(option: {
     query: string;
     projectId: string;
+    images?: string[];
     iterationLimit?: number;
     onStep?: (step: any) => void;
   }): Promise<{
     answer: string;
     steps: any[];
+    imageUrls: string[];
     projectId?: string;
   }> {
     const res = await this.llmClient.agentRunTime({
       user_query: option.query,
       projectId: option.projectId,
+      images: option.images,
       iterationLimit: option.iterationLimit ?? 8,
       onSteps: option.onStep,
     });
@@ -365,6 +370,7 @@ export class RAGPipeline {
     return {
       answer: res?.answer || "No response generated.",
       steps: res?.steps || [],
+      imageUrls: res?.imageUrls || [],
       projectId: option.projectId,
     };
   }
